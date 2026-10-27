@@ -18,6 +18,8 @@ from . import __version__
 from .alarms import AlarmListener, EventBus
 from .clips import Clips
 from .config import Config
+from .devices import APPROVED, PENDING, REVOKED, DeviceError, Devices, normalize_code
+from .devices import public as public_device
 from .push import Notifier
 from .store import Store
 
@@ -33,6 +35,10 @@ CLIPS = "zoio_clips"
 ALARMS = "zoio_alarms"
 NOTIFIER = "zoio_notifier"
 HTTP = "zoio_http"
+DEVICES = "zoio_devices"
+BG_TASKS = "zoio_bg_tasks"
+
+SESSION_COOKIE = "zoio_sessao"
 
 # Caminhos do go2rtc liberados pelo Zóio. A interface de administração
 # dele (que permite criar fontes novas) nunca é exposta.
@@ -54,6 +60,48 @@ def current_user(request: web.Request) -> str | None:
     return login.lower() if login else None
 
 
+# Liberados sem sessão: a "casca" do app e o necessário para um aparelho se cadastrar e entrar.
+PUBLIC_PATHS = {"/", "/sw.js", "/manifest.webmanifest", "/api/devices/me", "/api/devices/register", "/api/devices/challenge", "/api/devices/login"}
+HLS_ID = re.compile(r"^[0-9A-Za-z]{8}$")
+
+
+def is_public(request: web.Request) -> bool:
+    path = request.path
+    if path in PUBLIC_PATHS or path.startswith("/web/"):
+        return True
+    # No iPhone antigo (sem MSE), o player nativo busca a lista e os segmentos HLS
+    # sozinho, a partir de uma lista em data: URL, e nem sempre manda o cookie. Esses
+    # endereços só existem depois que um aparelho aprovado abriu o WebSocket, e
+    # carregam um id aleatório de ~47 bits gerado pelo go2rtc para aquela sessão.
+    if path.startswith("/live/hls/") and HLS_ID.match(request.query.get("id", "")):
+        return True
+    return False
+
+
+SAFE_HOST = re.compile(r"^[A-Za-z0-9.\-]+(:\d+)?$")
+
+
+def content_security_policy(request: web.Request) -> str:
+    host = request.host if SAFE_HOST.match(request.host or "") else None
+    connect = f"connect-src 'self' wss://{host} ws://{host}" if host else "connect-src 'self'"
+    return "; ".join(
+        [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",  # o player do go2rtc injeta um <style>
+            "img-src 'self' data: blob:",
+            "media-src 'self' data: blob:",  # MSE usa blob:, o HLS do iPhone usa data:
+            connect,
+            "worker-src 'self'",
+            "manifest-src 'self'",
+            "object-src 'none'",
+            "base-uri 'none'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+        ]
+    )
+
+
 @web.middleware
 async def security(request: web.Request, handler):
     cfg = request.app[CFG]
@@ -64,11 +112,45 @@ async def security(request: web.Request, handler):
     if origin and (request.method not in ("GET", "HEAD") or request.path == "/live/ws"):
         if urlsplit(origin).netloc != request.host:
             raise web.HTTPForbidden(text="Origem não permitida.")
+    request["session"] = None
+    if cfg.device_approval:
+        session = request.app[DEVICES].session(request.cookies.get(SESSION_COOKIE))
+        request["session"] = session
+        if session is None and not is_public(request):
+            raise web.HTTPUnauthorized(
+                text=json.dumps({"error": "aparelho_nao_autorizado"}),
+                content_type="application/json",
+            )
     resp = await handler(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Content-Security-Policy", content_security_policy(request))
     return resp
+
+
+def current_device(request: web.Request) -> dict | None:
+    session = request.get("session")
+    return session.device if session else None
+
+
+def require_admin(request: web.Request) -> dict:
+    device = current_device(request)
+    if not request.app[CFG].device_approval:
+        raise web.HTTPNotFound(text="aprovação de aparelhos desligada")
+    if device is None or not device["admin"]:
+        raise web.HTTPForbidden(text="só um aparelho administrador pode fazer isso")
+    return device
+
+
+async def json_body(request: web.Request) -> dict:
+    try:
+        body = await request.json()
+    except ValueError:
+        raise web.HTTPBadRequest(text="JSON inválido")
+    if not isinstance(body, dict):
+        raise web.HTTPBadRequest(text="JSON inválido")
+    return body
 
 
 # ---------------------------------------------------------------- páginas
@@ -98,6 +180,8 @@ async def api_config(request: web.Request) -> web.Response:
             "user": current_user(request),
             "cameras": [{"number": c.number, "name": c.name, "main": c.main, "sub": c.sub} for c in cfg.cameras],
             "push_key": notifier.vapid.public_key if notifier else None,
+            "device_approval": cfg.device_approval,
+            "device": public_device(current_device(request), current_device(request)["id"]) if current_device(request) else None,
         }
     )
 
@@ -155,6 +239,8 @@ async def api_event_stream(request: web.Request) -> web.StreamResponse:
         while True:
             try:
                 item = await asyncio.wait_for(q.get(), 25)
+                if item.get("type") == "device" and not (current_device(request) or {}).get("admin"):
+                    continue
                 await resp.write(f"data: {json.dumps(item, ensure_ascii=False)}\n\n".encode())
             except asyncio.TimeoutError:
                 await resp.write(b": ping\n\n")
@@ -232,19 +318,28 @@ async def api_clip_video(request: web.Request) -> web.FileResponse:
 async def api_push_subscribe(request: web.Request) -> web.Response:
     if NOTIFIER not in request.app:
         raise web.HTTPServiceUnavailable(text="notificações desligadas")
-    body = await request.json()
+    body = await json_body(request)
     sub = body.get("subscription") or {}
     endpoint = str(sub.get("endpoint", ""))
     keys = sub.get("keys") or {}
     if not endpoint.startswith("https://") or not keys.get("p256dh") or not keys.get("auth"):
         raise web.HTTPBadRequest(text="inscrição inválida")
-    cameras = [int(c) for c in body.get("cameras") or []] or None
-    request.app[STORE].save_subscription({"endpoint": endpoint, "keys": {"p256dh": keys["p256dh"], "auth": keys["auth"]}}, current_user(request), cameras)
+    try:
+        cameras = [int(c) for c in body.get("cameras") or []] or None
+    except (TypeError, ValueError):
+        raise web.HTTPBadRequest(text="câmeras inválidas")
+    device = current_device(request)
+    request.app[STORE].save_subscription(
+        {"endpoint": endpoint, "keys": {"p256dh": keys["p256dh"], "auth": keys["auth"]}},
+        current_user(request),
+        cameras,
+        device["id"] if device else None,
+    )
     return web.json_response({"ok": True})
 
 
 async def api_push_unsubscribe(request: web.Request) -> web.Response:
-    body = await request.json()
+    body = await json_body(request)
     request.app[STORE].delete_subscription(str(body.get("endpoint", "")))
     return web.json_response({"ok": True})
 
@@ -253,7 +348,7 @@ async def api_push_test(request: web.Request) -> web.Response:
     notifier = request.app.get(NOTIFIER)
     if notifier is None:
         raise web.HTTPServiceUnavailable(text="notificações desligadas")
-    body = await request.json()
+    body = await json_body(request)
     endpoint = (body.get("subscription") or {}).get("endpoint")
     sub = next((s["sub"] for s in request.app[STORE].subscriptions() if s["sub"]["endpoint"] == endpoint), None)
     if sub is None:
@@ -261,6 +356,152 @@ async def api_push_test(request: web.Request) -> web.Response:
     payload = json.dumps({"title": "Zóio", "body": "Notificações funcionando neste aparelho.", "tag": "teste"}).encode()
     ok = await notifier.send(sub, payload)
     return web.json_response({"ok": ok})
+
+
+# ---------------------------------------------------------------- aparelhos
+
+
+def _devices(request: web.Request) -> Devices:
+    if not request.app[CFG].device_approval:
+        raise web.HTTPNotFound(text="aprovação de aparelhos desligada")
+    return request.app[DEVICES]
+
+
+async def api_device_me(request: web.Request) -> web.Response:
+    device = current_device(request)
+    return web.json_response(
+        {
+            "required": request.app[CFG].device_approval,
+            "device": public_device(device, device["id"]) if device else None,
+            "has_admin": request.app[DEVICES].admin_count() > 0 if request.app[CFG].device_approval else None,
+        }
+    )
+
+
+async def api_device_register(request: web.Request) -> web.Response:
+    devices = _devices(request)
+    body = await json_body(request)
+    try:
+        device, created = devices.register(body.get("public_key"), str(body.get("name", "")), current_user(request), request.headers.get("User-Agent"))
+    except DeviceError as exc:
+        raise web.HTTPBadRequest(text=str(exc))
+    if device["status"] == REVOKED:
+        return web.json_response({"status": REVOKED}, status=403)
+    if created:
+        log.info("aparelho novo pedindo acesso: %s (%s)", device["name"], device["code"])
+        request.app[BUS].publish({"type": "device", "status": PENDING, "id": device["id"], "name": device["name"], "code": device["code"]})
+        notifier = request.app.get(NOTIFIER)
+        if notifier:
+            task = asyncio.create_task(notifier.device_request(device["name"], device["code"]))
+            request.app[BG_TASKS].add(task)
+            task.add_done_callback(request.app[BG_TASKS].discard)
+    return web.json_response({"id": device["id"], "code": device["code"], "status": device["status"]})
+
+
+async def api_device_challenge(request: web.Request) -> web.Response:
+    try:
+        return web.json_response({"nonce": _devices(request).challenge()})
+    except DeviceError as exc:
+        raise web.HTTPTooManyRequests(text=str(exc))
+
+
+async def api_device_login(request: web.Request) -> web.Response:
+    devices = _devices(request)
+    body = await json_body(request)
+    try:
+        device = devices.verify(str(body.get("id", "")), str(body.get("nonce", "")), str(body.get("signature", "")))
+    except LookupError:
+        return web.json_response({"status": "unknown"}, status=404)
+    except DeviceError as exc:
+        return web.json_response({"status": "invalid", "error": str(exc)}, status=401)
+    if device["status"] != APPROVED:
+        # Assinatura válida, mas sem acesso ainda: responde 200 sem sessão (o app consulta em loop).
+        return web.json_response({"status": device["status"], "code": device["code"]})
+    token = devices.open_session(device["id"])
+    resp = web.json_response({"status": APPROVED, "device": public_device(device, device["id"])})
+    resp.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=devices.session_seconds,
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="Strict",
+    )
+    return resp
+
+
+async def api_device_logout(request: web.Request) -> web.Response:
+    session = request.get("session")
+    if session:
+        request.app[DEVICES].close_session(session.token_hash)
+    resp = web.json_response({"ok": True})
+    resp.del_cookie(SESSION_COOKIE, path="/")
+    return resp
+
+
+async def api_device_rename(request: web.Request) -> web.Response:
+    device = current_device(request)
+    if device is None:
+        raise web.HTTPNotFound(text="aprovação de aparelhos desligada")
+    body = await json_body(request)
+    name = " ".join(str(body.get("name", "")).split())[:60]
+    if not name:
+        raise web.HTTPBadRequest(text="nome vazio")
+    request.app[STORE].update_device(device["id"], name=name)
+    return web.json_response({"ok": True, "name": name})
+
+
+async def api_device_list(request: web.Request) -> web.Response:
+    me = require_admin(request)
+    order = {PENDING: 0, APPROVED: 1, REVOKED: 2}
+    items = sorted(request.app[STORE].devices(), key=lambda d: (order.get(d["status"], 3), -d["created_at"]))
+    return web.json_response([public_device(d, me["id"]) for d in items])
+
+
+def _target_device(request: web.Request) -> dict:
+    device = request.app[STORE].device(request.match_info["id"])
+    if device is None:
+        raise web.HTTPNotFound(text="aparelho não encontrado")
+    return device
+
+
+async def api_device_approve(request: web.Request) -> web.Response:
+    """Aprova pelo código que aparece na tela do aparelho novo.
+
+    Aprovar pelo código (e não por um item da lista) garante que quem aprova
+    está olhando para o aparelho certo: um intruso que se cadastrar com o
+    mesmo nome terá outro código.
+    """
+    me = require_admin(request)
+    body = await json_body(request)
+    code = normalize_code(str(body.get("code", "")))
+    target = next((d for d in request.app[STORE].devices(status=PENDING) if normalize_code(d["code"]) == code), None) if code else None
+    if target is None:
+        raise web.HTTPNotFound(text="nenhum aparelho aguardando com esse código")
+    device = request.app[DEVICES].approve(target["id"], admin=bool(body.get("admin")), by=me["id"])
+    request.app[BUS].publish({"type": "device", "status": APPROVED, "id": device["id"], "name": device["name"], "code": device["code"]})
+    return web.json_response(public_device(device, me["id"]))
+
+
+async def api_device_revoke(request: web.Request) -> web.Response:
+    me = require_admin(request)
+    target = _target_device(request)
+    devices = request.app[DEVICES]
+    if target["admin"] and target["status"] == APPROVED and devices.admin_count() <= 1:
+        raise web.HTTPConflict(text="este é o único administrador; aprove outro antes (ou use o Pi)")
+    device = devices.revoke(target["id"])
+    request.app[BUS].publish({"type": "device", "status": REVOKED, "id": device["id"], "name": device["name"], "code": device["code"]})
+    return web.json_response(public_device(device, me["id"]))
+
+
+async def api_device_delete(request: web.Request) -> web.Response:
+    require_admin(request)
+    target = _target_device(request)
+    if target["status"] == APPROVED:
+        raise web.HTTPConflict(text="revogue o aparelho antes de excluir")
+    request.app[DEVICES].delete(target["id"])
+    return web.json_response({"ok": True})
 
 
 # ---------------------------------------------------------------- ao vivo
@@ -338,6 +579,7 @@ async def _lifecycle(app: web.Application):
     async def housekeeping():
         while True:
             app[STORE].prune_events()
+            app[STORE].prune_sessions()
             await asyncio.sleep(6 * 3600)
 
     tasks.append(asyncio.create_task(housekeeping()))
@@ -358,9 +600,11 @@ def create_app(cfg: Config, enable_push: bool = True) -> web.Application:
     app[STORE] = store = Store(cfg.data_dir / "zoio.db")
     app[BUS] = bus = EventBus()
     app[CLIPS] = Clips(cfg)
+    app[DEVICES] = Devices(store, cfg.session_days)
+    app[BG_TASKS] = set()
     notifier = None
     if enable_push:
-        app[NOTIFIER] = notifier = Notifier(store, cfg.push_contact, cfg.notify_cooldown, cfg.notify_channels)
+        app[NOTIFIER] = notifier = Notifier(store, cfg.push_contact, cfg.notify_cooldown, cfg.notify_channels, approved_only=cfg.device_approval)
     app[ALARMS] = AlarmListener(cfg, store, bus, notifier)
     app.cleanup_ctx.append(_lifecycle)
 
@@ -380,5 +624,15 @@ def create_app(cfg: Config, enable_push: bool = True) -> web.Application:
     r.add_post("/api/push/subscribe", api_push_subscribe)
     r.add_post("/api/push/unsubscribe", api_push_unsubscribe)
     r.add_post("/api/push/test", api_push_test)
+    r.add_get("/api/devices/me", api_device_me)
+    r.add_post("/api/devices/register", api_device_register)
+    r.add_post("/api/devices/challenge", api_device_challenge)
+    r.add_post("/api/devices/login", api_device_login)
+    r.add_post("/api/devices/logout", api_device_logout)
+    r.add_post("/api/devices/rename", api_device_rename)
+    r.add_get("/api/devices", api_device_list)
+    r.add_post("/api/devices/approve", api_device_approve)
+    r.add_post("/api/devices/{id}/revoke", api_device_revoke)
+    r.add_post("/api/devices/{id}/delete", api_device_delete)
     r.add_get("/live/{tail:.+}", live_proxy)
     return app

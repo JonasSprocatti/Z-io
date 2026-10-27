@@ -58,6 +58,8 @@ class Config:
     go2rtc_url: str = "http://127.0.0.1:1984"
     data_dir: Path = Path("/var/lib/zoio")
     allowed_users: set[str] = field(default_factory=set)
+    device_approval: bool = True
+    session_days: int = 30
     alerts: bool = True
     notify_channels: set[int] = field(default_factory=set)  # vazio = todas
     notify_cooldown: int = 300
@@ -76,6 +78,10 @@ class Config:
 
     def camera(self, number: int) -> Camera | None:
         return next((c for c in self.cameras if c.number == number), None)
+
+
+def _flag(raw: str) -> bool:
+    return raw.strip().lower() not in ("0", "false", "no", "nao", "não", "off")
 
 
 def _int_set(raw: str) -> set[int]:
@@ -111,7 +117,9 @@ def load(env_file: str | None = None) -> Config:
         go2rtc_url=env.get("GO2RTC_URL", "http://127.0.0.1:1984").rstrip("/"),
         data_dir=Path(env.get("ZOIO_DATA_DIR", "/var/lib/zoio")),
         allowed_users={u.strip().lower() for u in env.get("ZOIO_ALLOWED_USERS", "").split(",") if u.strip()},
-        alerts=env.get("ZOIO_ALERTS", "1") not in ("0", "false", "no", "nao", "não"),
+        device_approval=_flag(env.get("ZOIO_DEVICE_APPROVAL", "1")),
+        session_days=int(env.get("ZOIO_SESSION_DAYS", "30")),
+        alerts=_flag(env.get("ZOIO_ALERTS", "1")),
         notify_channels=_int_set(env.get("ZOIO_NOTIFY_CHANNELS", "")),
         notify_cooldown=int(env.get("ZOIO_NOTIFY_COOLDOWN", "300")),
         cache_max_mb=int(env.get("ZOIO_CACHE_MAX_MB", "2048")),

@@ -28,10 +28,24 @@ Servidor Python (aiohttp) com quatro papéis:
 ### Tailscale serve
 Publica `https://<pi>.<tailnet>.ts.net` → `http://127.0.0.1:8080`, com certificado válido (necessário para PWA, service worker e Web Push) e o cabeçalho `Tailscale-User-Login`, que o Zóio confere quando `ZOIO_ALLOWED_USERS` está definido.
 
+## Aprovação de aparelhos (`devices.py`)
+
+Mesmo dentro da VPN, cada aparelho precisa ser aprovado individualmente:
+
+1. **Chave do aparelho.** O app gera um par ECDSA P-256 pela WebCrypto com `extractable: false` e guarda no IndexedDB. Nem o JavaScript do app consegue ler a chave privada, só pedir assinaturas.
+2. **Cadastro.** `POST /api/devices/register` envia a chave pública (JWK). O servidor valida o ponto na curva e calcula o **código** (8 caracteres base32 do SHA-256 da chave, 40 bits), que aparece na tela do aparelho. Há no máximo 10 pedidos pendentes, e os mais antigos saem.
+3. **Aprovação pelo código.** Um aparelho administrador digita o código visto na tela do aparelho novo (`POST /api/devices/approve`), ou o dono do Pi roda `zoio aparelhos aprovar CÓDIGO`. Aprovar pelo código, e não clicando num item da lista, impede que um intruso com o mesmo nome seja aprovado por engano.
+4. **Entrada.** `POST /api/devices/challenge` devolve um desafio aleatório de uso único, válido por 2 minutos. O aparelho assina `zoio-login\n<desafio>\n<id>` e envia para `POST /api/devices/login`. Com a assinatura válida e o aparelho aprovado, o servidor cria uma sessão: um token aleatório de 256 bits num cookie `HttpOnly; Secure; SameSite=Strict`, guardado no banco só como SHA-256. A validade se renova com o uso.
+5. **Revogação.** Apaga as sessões e as inscrições de push do aparelho na hora. Um aparelho revogado não consegue se recadastrar com a mesma chave até ser excluído da lista. O último administrador não pode ser revogado pelo app, para ninguém ficar trancado para fora. O Pi sempre pode.
+
+Exceções sem sessão: a "casca" do app (`/`, `/web/*`, `/sw.js`, manifesto), os endpoints de cadastro e entrada e os segmentos HLS do go2rtc que trazem um `id` de sessão válido. O player nativo do iPhone antigo busca esses segmentos sozinho e nem sempre manda o cookie. O `id` é aleatório (`crypto/rand`, ~47 bits) e só existe depois que um aparelho aprovado abriu o WebSocket do ao vivo.
+
 ## Segurança
 
-- Nenhum serviço escuta fora do `127.0.0.1`. O único caminho de fora é o Tailscale.
+- Nenhum serviço escuta fora do `127.0.0.1`. O único caminho de fora é a VPN (hoje, o Tailscale; alternativas em [acesso-remoto.md](acesso-remoto.md)).
+- Cada aparelho precisa ser aprovado (seção acima). A VPN é a primeira trava, e a aprovação é a segunda.
 - `ZOIO_ALLOWED_USERS` restringe a logins específicos do Tailscale.
+- Content-Security-Policy restrita: só scripts do próprio Zóio, sem iframes nem objetos, e conexões só com o próprio endereço.
 - Pedidos com `Origin` de outro site são recusados (CSRF e WebSocket entre origens).
 - Os nomes de arquivo e os horários das gravações são validados. O id do clipe é um hash, e o caminho nunca vem do cliente.
 - Os serviços rodam como o usuário `zoio`, com `ProtectSystem=strict`, `ProtectHome` e `NoNewPrivileges`.
