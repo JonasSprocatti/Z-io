@@ -1,0 +1,25 @@
+[Unit]
+Description=Zóio (app das câmeras)
+After=network-online.target zoio-go2rtc.service
+Wants=network-online.target
+
+[Service]
+User=zoio
+Group=zoio
+Environment=ZOIO_ENV_FILE=/etc/zoio/zoio.env
+ExecStart=/opt/zoio/venv/bin/python -m zoio serve
+Restart=always
+RestartSec=5
+MemoryMax=250M
+Nice=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/zoio
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
