@@ -1,21 +1,109 @@
 // Zóio: app web (PWA). Sem build, sem dependências: o player vem do go2rtc via /live/.
 
+import * as device from '/web/device.js';
+
 const $ = (sel) => document.querySelector(sel);
-const state = { config: null, cameras: [], liveEls: new Map(), alertsUnread: 0, oldestAlert: null };
+const state = { config: null, me: null, cameras: [], liveEls: new Map(), alertsUnread: 0, oldestAlert: null, pendingDevices: 0 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const store = {
   get(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } },
   set(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* modo privado */ } },
 };
 
-async function api(path, opts = {}) {
+async function api(path, opts = {}, retry = true) {
   const res = await fetch(path, {
     ...opts,
     headers: opts.body ? { 'Content-Type': 'application/json' } : undefined,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
+  // Sessão vencida ou aparelho revogado: entra de novo com a chave do aparelho.
+  if (res.status === 401 && retry) {
+    await ensureSession();
+    return api(path, opts, false);
+  }
   if (!res.ok) throw new Error((await res.text()) || res.statusText);
   return res.json();
+}
+
+// ------------------------------------------------------------------ aparelho
+
+let sessionPromise = null;
+function ensureSession() {
+  sessionPromise ??= authenticate().finally(() => { sessionPromise = null; });
+  return sessionPromise;
+}
+
+function showPair(mode, rec) {
+  $('#pair').hidden = false;
+  $('#pair-wait').hidden = mode !== 'wait';
+  $('#pair-revoked').hidden = mode !== 'revoked';
+  $('#pair-unsupported').hidden = mode !== 'unsupported';
+  if (mode === 'wait' && rec) {
+    $('#pair-code').textContent = rec.code ?? '····-····';
+    $('#pair-cmd').textContent = `sudo zoio aparelhos aprovar ${rec.code ?? ''}`;
+    const name = $('#pair-name');
+    if (document.activeElement !== name) name.value = rec.name ?? '';
+    $('#pair-save').onclick = async () => {
+      const value = name.value.trim();
+      if (!value) return;
+      await device.rename(rec, value);
+      const res = await device.register(rec, value);
+      $('#pair-status').textContent = res.error ? 'Não consegui salvar o nome.' : 'Nome salvo. Aguardando aprovação…';
+    };
+    $('#pair-ios').hidden = !(/iPhone|iPad/.test(navigator.userAgent));
+  }
+}
+
+async function authenticate() {
+  const me = await (await fetch('/api/devices/me')).json();
+  if (!me.required || me.device) {
+    state.me = me;
+    return;
+  }
+  if (!device.supported()) {
+    showPair('unsupported');
+    return new Promise(() => {}); // sem chave, não há como seguir
+  }
+  const rec = await device.identity();
+  for (;;) {
+    try {
+      if (!rec.id) {
+        const reg = await device.register(rec);
+        if (reg.status === 'revoked') {
+          showPair('revoked');
+          await sleep(30000);
+          continue;
+        }
+        if (reg.error) throw new Error(reg.error.error ?? 'cadastro recusado');
+      }
+      const res = await device.login(rec);
+      if (res.status === 'approved') {
+        $('#pair').hidden = true;
+        state.me = { required: true, device: res.device };
+        return;
+      }
+      if (res.status === 'unknown') { // excluído da lista: pede acesso de novo
+        rec.id = null;
+        continue;
+      }
+      if (res.status === 'revoked') {
+        showPair('revoked');
+        await sleep(30000);
+        continue;
+      }
+      if (res.status === 'pending') {
+        showPair('wait', rec);
+        $('#pair-status').textContent = 'Aguardando aprovação…';
+      } else {
+        throw new Error(res.status);
+      }
+    } catch (err) {
+      showPair('wait', rec);
+      $('#pair-status').textContent = `Sem resposta do Pi (${err.message}). Tentando de novo…`;
+    }
+    await sleep(4000);
+  }
 }
 
 function toast(text, ms = 3500) {
@@ -57,7 +145,8 @@ function makeStream(src, { controls }) {
   // MSE e HLS passam pelo mesmo endereço HTTPS do Zóio; nada de portas extras.
   v.mode = 'mse,hls';
   v.background = false;
-  v.visibilityCheck = true; // para de puxar vídeo quando a câmera sai da tela
+  v.visibilityCheck = true; // para quando o app vai para segundo plano
+  v.visibilityThreshold = 0.01; // e quando a câmera sai da tela (rolagem)
   queueMicrotask(() => {
     if (v.video) { v.video.controls = controls; v.video.muted = true; }
     v.src = `/live/ws?src=${encodeURIComponent(src)}`;
@@ -213,6 +302,11 @@ function listenEvents() {
   const src = new EventSource('/api/events/stream');
   src.onmessage = (msg) => {
     const ev = JSON.parse(msg.data);
+    if (ev.type === 'device') {
+      if (ev.status === 'pending') toast(`Aparelho novo pedindo acesso: ${ev.name}. Aprove em Ajustes.`, 6000);
+      refreshDevices();
+      return;
+    }
     if (ev.type !== 'motion') return;
     if (ev.status === 'Start') {
       flashMotion(ev.camera);
@@ -222,7 +316,13 @@ function listenEvents() {
       if (currentView !== 'alerts') setBadge(state.alertsUnread + 1);
     }
   };
-  src.onerror = () => updateStatus();
+  src.onerror = () => {
+    updateStatus();
+    // Com 401 o navegador desiste da conexão; entra de novo e reabre.
+    if (src.readyState === EventSource.CLOSED) {
+      setTimeout(() => ensureSession().catch(() => {}).finally(listenEvents), 5000);
+    }
+  };
 }
 
 // ------------------------------------------------------------------ notificações
@@ -294,12 +394,117 @@ function hevcSupport() {
   return !!mse && mse.isTypeSupported('video/mp4; codecs="hvc1.1.6.L153.B0"');
 }
 
+const kv = (k, v) => el('li', {}, el('span', {}, k), el('span', {}, v));
+const when = (ts) => ts ? new Date(ts * 1000).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+
+function setSettingsBadge(n) {
+  state.pendingDevices = n;
+  const b = $('#settings-badge');
+  b.hidden = n === 0;
+  b.textContent = n;
+}
+
+function shortUA(ua) {
+  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android'
+    : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+  const nav = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
+  return [os, nav].filter(Boolean).join(' ');
+}
+
+function deviceItem(d) {
+  const [cls, label] = {
+    pending: ['wait', 'aguardando'],
+    approved: ['ok', d.admin ? 'administrador' : 'aprovado'],
+    revoked: ['off', 'revogado'],
+  }[d.status] ?? ['off', d.status];
+  const details = [
+    d.status === 'pending' ? `pediu em ${when(d.created_at)}` : `visto em ${when(d.last_seen)}`,
+    d.status === 'pending' ? null : `código ${d.code}`, // o código do aparelho novo é conferido na tela dele
+    d.user,
+    d.user_agent ? shortUA(d.user_agent) : null,
+  ].filter(Boolean).join(' · ');
+  const act = async (path, question) => {
+    if (question && !confirm(question)) return;
+    try {
+      await api(`/api/devices/${d.id}/${path}`, { method: 'POST', body: {} });
+    } catch (err) {
+      toast(err.message);
+    }
+    refreshDevices();
+  };
+  const actions = [];
+  if (d.status === 'pending') actions.push(el('button', { class: 'ghost', onclick: () => act('revoke', `Recusar o pedido de "${d.name}"?`) }, 'Recusar'));
+  if (d.status === 'approved' && !d.current) actions.push(el('button', { class: 'ghost', onclick: () => act('revoke', `Revogar "${d.name}"? Ele perde o acesso na hora.`) }, 'Revogar'));
+  if (d.status === 'revoked') actions.push(el('button', { class: 'ghost', onclick: () => act('delete', `Excluir "${d.name}"? Ele poderá pedir acesso de novo.`) }, 'Excluir'));
+  return el('li', {},
+    el('div', { class: 'main' },
+      el('div', {}, d.name, d.current ? ' (este aparelho) ' : ' ', el('span', { class: `tag ${cls}` }, label)),
+      el('div', { class: 'sub' }, details)),
+    el('div', { class: 'dev-actions' }, ...actions));
+}
+
+function approveForm() {
+  const code = el('input', { type: 'text', placeholder: 'ABCD-EFGH', maxlength: 9, autocomplete: 'off', 'aria-label': 'Código do aparelho novo' });
+  const admin = el('input', { type: 'checkbox' });
+  const submit = async (e) => {
+    e.preventDefault();
+    try {
+      const d = await api('/api/devices/approve', { method: 'POST', body: { code: code.value, admin: admin.checked } });
+      toast(`Aprovado: ${d.name}.`);
+      code.value = '';
+    } catch (err) {
+      toast(err.message);
+    }
+    refreshDevices();
+  };
+  return el('li', { class: 'column' },
+    el('form', { onsubmit: submit },
+      el('div', {}, 'Aprovar aparelho novo'),
+      el('div', { class: 'sub' }, 'Digite o código que aparece na tela dele.'),
+      el('div', { class: 'dev-approve' }, code, el('button', { type: 'submit' }, 'Aprovar')),
+      el('label', { class: 'check' }, admin, 'pode aprovar outros aparelhos')));
+}
+
+async function refreshDevices() {
+  if (!state.me?.device?.admin) return;
+  let items;
+  try {
+    items = await api('/api/devices');
+  } catch (err) {
+    $('#device-list').replaceChildren(el('li', { class: 'empty' }, err.message));
+    return;
+  }
+  const pending = items.filter((d) => d.status === 'pending');
+  setSettingsBadge(pending.length);
+  if (currentView !== 'settings') return;
+  $('#device-list').replaceChildren(approveForm(), ...items.map(deviceItem));
+}
+
 async function renderSettings() {
   renderPush();
-  const kv = (k, v) => el('li', {}, el('span', {}, k), el('span', {}, v));
+  const me = state.me?.device;
   $('#device-info').replaceChildren(
+    ...(me ? [kv('Nome', me.name), kv('Código', me.code), kv('Permissão', me.admin ? 'administrador' : 'comum')] : []),
     kv('Vídeo H.265 ao vivo', hevcSupport() ? 'suportado' : 'não suportado (peça H.264 no fluxo secundário do DVR)'),
     kv('Usuário Tailscale', state.config.user ?? '—'));
+  $('#device-rename').hidden = !me;
+  if (me) {
+    $('#device-name').value = me.name;
+    $('#device-name-save').onclick = async () => {
+      const name = $('#device-name').value.trim();
+      if (!name) return;
+      try {
+        const r = await api('/api/devices/rename', { method: 'POST', body: { name } });
+        me.name = r.name;
+        toast('Nome salvo.');
+        renderSettings();
+      } catch (err) {
+        toast(err.message);
+      }
+    };
+  }
+  $('#devices-card').hidden = !me?.admin;
+  if (me?.admin) refreshDevices();
   try {
     const s = await api('/api/status');
     $('#server-info').replaceChildren(
@@ -350,7 +555,9 @@ function route() {
 async function init() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   try {
+    await ensureSession();
     state.config = await api('/api/config');
+    if (state.config.device) state.me = { required: true, device: state.config.device };
   } catch (err) {
     document.body.innerHTML = `<p style="padding:24px">Não consegui falar com o Zóio: ${err.message}</p>`;
     return;
@@ -371,6 +578,14 @@ async function init() {
   route();
   listenEvents();
   updateStatus();
+  refreshDevices();
+  // Reenvia a inscrição de push deste navegador: liga a inscrição ao aparelho
+  // aprovado e acompanha uma eventual troca de endereço pelo serviço de push.
+  pushSubscription().then((sub) => {
+    if (sub && state.config.push_key) {
+      api('/api/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON(), cameras: store.get('pushCameras', []) } }).catch(() => {});
+    }
+  }).catch(() => {});
   setInterval(updateStatus, 30000);
 }
 

@@ -17,7 +17,8 @@ Funciona no Android, no iPhone, no computador e no navegador, porque é um app w
 - **Ao vivo:** o go2rtc pega o RTSP do DVR e entrega ao navegador por MSE/HLS, sem recodificar (o Pi 3B não aguentaria). A grade usa o fluxo secundário, e a tela cheia usa o principal.
 - **Gravações:** continuam no HD do DVR. O Zóio busca os arquivos pelo protocolo DVRIP, baixa o trecho escolhido e converte para MP4 sem recodificar. Os vídeos ficam num cache no Pi.
 - **Alertas:** o Zóio fica inscrito nos alarmes de movimento do próprio DVR. Cada alerta aparece na hora no app e vira uma notificação push (Web Push cifrado de ponta a ponta), com um intervalo mínimo por câmera.
-- **Segurança:** os serviços só escutam no `127.0.0.1` do Pi. O acesso de fora passa pelo `tailscale serve`, que exige estar na sua rede Tailscale e informa quem está acessando. Dá para limitar a usuários específicos com `ZOIO_ALLOWED_USERS`. A interface de administração do go2rtc nunca é exposta.
+- **Aparelhos autorizados:** cada aparelho cria a própria chave digital, que nunca sai dele, e só vê as câmeras depois que você o aprova. Dá para revogar qualquer um na hora.
+- **Segurança:** os serviços só escutam no `127.0.0.1` do Pi. O acesso de fora passa pelo `tailscale serve`, que exige estar na sua rede Tailscale. Dá para limitar a usuários específicos com `ZOIO_ALLOWED_USERS`. A interface de administração do go2rtc nunca é exposta. As alternativas ao Tailscale (WireGuard próprio, Headscale) estão em [docs/acesso-remoto.md](docs/acesso-remoto.md).
 
 Mais detalhes em [docs/arquitetura.md](docs/arquitetura.md).
 
@@ -45,11 +46,28 @@ sudo nano /etc/zoio/zoio.env
 sudo systemctl restart zoio-go2rtc zoio
 ```
 
-Para testar a conexão com o DVR (login, gravações das últimas 24h e 15 s de alarmes):
+Para testar a conexão com o DVR (login, relógio, gravações das últimas 24h e 15 s de alarmes):
 
 ```bash
-sudo -u zoio ZOIO_ENV_FILE=/etc/zoio/zoio.env /opt/zoio/venv/bin/python -m zoio check
+sudo zoio check
+sudo zoio check --baixar   # também baixa o começo da gravação mais recente e converte para MP4
 ```
+
+## Aparelhos autorizados
+
+Só aparelhos aprovados abrem o Zóio, mesmo estando na sua rede Tailscale.
+
+1. Abra o Zóio no aparelho. Ele cria uma chave própria (ECDSA P-256, não exportável, guardada pelo navegador) e mostra um **código**, como `K7Q2-M9XD`.
+2. **Primeiro aparelho:** aprove no Pi com `sudo zoio aparelhos aprovar K7Q2-M9XD`. Ele vira administrador.
+3. **Os próximos:** num aparelho administrador, abra **Ajustes › Aparelhos** e digite o código que aparece na tela do aparelho novo. Os administradores recebem um aviso quando alguém pede acesso. Marque "pode aprovar outros aparelhos" só nos seus.
+4. Para tirar o acesso, use **Revogar** no app ou `sudo zoio aparelhos revogar CÓDIGO`. A sessão cai na hora e as notificações daquele aparelho param.
+
+Outros comandos: `sudo zoio aparelhos` (lista) e `sudo zoio aparelhos excluir CÓDIGO` (apaga um aparelho revogado para ele poder pedir de novo).
+
+Detalhes que importam:
+- Depois de aprovado, o aparelho entra sozinho: ele assina um desafio com a chave dele e recebe uma sessão (cookie HttpOnly) que vale `ZOIO_SESSION_DAYS` dias sem uso.
+- No iPhone, o Safari e o app da Tela de Início guardam dados separados e contam como dois aparelhos. Aprove o da Tela de Início.
+- Limpar os dados do site, ou usar janela anônima, apaga a chave. Aí o aparelho precisa ser aprovado de novo.
 
 Para atualizar: `git pull && sudo ./deploy/install.sh`.
 
@@ -65,7 +83,7 @@ Para atualizar: `git pull && sudo ./deploy/install.sh`.
 - **Ao vivo:** toque numa câmera para abrir em tela cheia no fluxo principal. Os botões 1 a 4 mudam quantas câmeras aparecem por linha. Uma borda vermelha indica movimento.
 - **Gravações:** escolha a câmera e o dia. Os trechos com movimento aparecem marcados. "Assistir" baixa o trecho do DVR, a cerca de 1 MB/s, e toca no app. Também dá para baixar o MP4.
 - **Alertas:** histórico dos últimos 30 dias, com atalho para a gravação.
-- **Ajustes:** ativa as notificações neste aparelho e escolhe quais câmeras avisam. No iPhone, primeiro adicione o Zóio à Tela de Início (iOS 16.4 ou mais novo).
+- **Ajustes:** ativa as notificações neste aparelho e escolhe quais câmeras avisam. No iPhone, primeiro adicione o Zóio à Tela de Início (iOS 16.4 ou mais novo). Nos aparelhos administradores, também lista e aprova os aparelhos.
 
 ## Desenvolvimento
 
@@ -75,7 +93,7 @@ pip install -e '.[test]'
 pytest
 ```
 
-Os testes usam um DVR simulado (`tests/fake_dvr.py`), que fala DVRIP, e um go2rtc simulado. Eles cobrem login, busca paginada, download e conversão para MP4 (conferida com o ffprobe), alarmes, Web Push, controle de acesso e o proxy do ao vivo.
+Os testes usam um DVR simulado (`tests/fake_dvr.py`), que fala DVRIP, e um go2rtc simulado. Eles cobrem login, busca paginada, download e conversão para MP4 (conferida com o ffprobe), alarmes, Web Push, controle de acesso, o proxy do ao vivo e a aprovação de aparelhos (assinaturas, desafio de uso único, revogação e linha de comando).
 
 ## Próximas fases
 

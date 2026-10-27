@@ -68,6 +68,15 @@ PY
   fi
 fi
 
+echo "==> Atalho de linha de comando (sudo zoio ...)"
+cat > /usr/local/bin/zoio <<'SH'
+#!/bin/sh
+# Atalho para a linha de comando do Zóio. Roda como o usuário do serviço.
+# Exemplos: sudo zoio aparelhos | sudo zoio aparelhos aprovar ABCD-EFGH | sudo zoio check
+exec sudo -u zoio env ZOIO_ENV_FILE=/etc/zoio/zoio.env /opt/zoio/venv/bin/python -m zoio "$@"
+SH
+chmod 755 /usr/local/bin/zoio
+
 echo "==> Serviços"
 install -m 644 "$REPO/deploy/zoio.service" /etc/systemd/system/zoio.service
 install -m 644 "$REPO/deploy/zoio-go2rtc.service" /etc/systemd/system/zoio-go2rtc.service
@@ -90,4 +99,7 @@ fi
 
 sleep 2
 systemctl --no-pager --lines=0 status zoio zoio-go2rtc | grep -E "●|Active:" || true
-echo "Pronto. Para testar o DVR: sudo -u zoio ZOIO_ENV_FILE=/etc/zoio/zoio.env /opt/zoio/venv/bin/python -m zoio check"
+echo "Pronto."
+echo "  Testar o DVR:            sudo zoio check"
+echo "  Ver aparelhos:           sudo zoio aparelhos"
+echo "  Aprovar o 1º aparelho:   abra o Zóio nele e rode: sudo zoio aparelhos aprovar CÓDIGO"

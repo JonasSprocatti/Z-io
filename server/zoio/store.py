@@ -1,4 +1,4 @@
-"""Banco SQLite pequeno: eventos de movimento, inscrições de notificação e chaves."""
+"""Banco SQLite pequeno: eventos, aparelhos aprovados, sessões, notificações e chaves."""
 
 from __future__ import annotations
 
@@ -28,17 +28,45 @@ CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    public_key TEXT NOT NULL UNIQUE,
+    code TEXT NOT NULL,
+    status TEXT NOT NULL,
+    admin INTEGER NOT NULL DEFAULT 0,
+    user TEXT,
+    user_agent TEXT,
+    created_at REAL NOT NULL,
+    approved_at REAL,
+    approved_by TEXT,
+    last_seen REAL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    device_id TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS sessions_device ON sessions(device_id);
 """
+
+DEVICE_FIELDS = {"name", "status", "admin", "approved_at", "approved_by", "last_seen"}
 
 EVENT_RETENTION_DAYS = 30
 
 
 class Store:
     def __init__(self, path: str | Path):
-        self.db = sqlite3.connect(str(path), check_same_thread=False)
+        # timeout: a linha de comando (`zoio aparelhos`) pode escrever junto com o servidor
+        self.db = sqlite3.connect(str(path), check_same_thread=False, timeout=5)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        columns = {r["name"] for r in self.db.execute("PRAGMA table_info(push_subscriptions)")}
+        if "device_id" not in columns:  # bancos da versão 0.1
+            self.db.execute("ALTER TABLE push_subscriptions ADD COLUMN device_id TEXT")
+            self.db.commit()
 
     def close(self) -> None:
         self.db.close()
@@ -76,10 +104,10 @@ class Store:
 
     # ---- notificações ----
 
-    def save_subscription(self, sub: dict, user: str | None, cameras: list[int] | None) -> None:
+    def save_subscription(self, sub: dict, user: str | None, cameras: list[int] | None, device_id: str | None = None) -> None:
         self.db.execute(
-            "INSERT OR REPLACE INTO push_subscriptions(endpoint, data, user, cameras, created_at) VALUES (?,?,?,?,?)",
-            (sub["endpoint"], json.dumps(sub), user, json.dumps(cameras) if cameras else None, time.time()),
+            "INSERT OR REPLACE INTO push_subscriptions(endpoint, data, user, cameras, created_at, device_id) VALUES (?,?,?,?,?,?)",
+            (sub["endpoint"], json.dumps(sub), user, json.dumps(cameras) if cameras else None, time.time(), device_id),
         )
         self.db.commit()
 
@@ -87,9 +115,88 @@ class Store:
         self.db.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
         self.db.commit()
 
-    def subscriptions(self) -> list[dict]:
-        rows = self.db.execute("SELECT data, cameras FROM push_subscriptions").fetchall()
-        return [{"sub": json.loads(r["data"]), "cameras": json.loads(r["cameras"]) if r["cameras"] else None} for r in rows]
+    def delete_device_subscriptions(self, device_id: str) -> None:
+        self.db.execute("DELETE FROM push_subscriptions WHERE device_id = ?", (device_id,))
+        self.db.commit()
+
+    def subscriptions(self, approved_only: bool = False, admins_only: bool = False) -> list[dict]:
+        """Inscrições de push. Com a aprovação ligada, só as de aparelhos aprovados."""
+        sql = (
+            "SELECT s.data, s.cameras, s.device_id, d.status, d.admin FROM push_subscriptions s "
+            "LEFT JOIN devices d ON d.id = s.device_id"
+        )
+        rows = self.db.execute(sql).fetchall()
+        out = []
+        for r in rows:
+            if (approved_only or admins_only) and r["status"] != "approved":
+                continue
+            if admins_only and not r["admin"]:
+                continue
+            out.append({"sub": json.loads(r["data"]), "cameras": json.loads(r["cameras"]) if r["cameras"] else None, "device_id": r["device_id"]})
+        return out
+
+    # ---- aparelhos e sessões ----
+
+    def add_device(self, device: dict) -> None:
+        cols = ", ".join(device)
+        marks = ", ".join("?" for _ in device)
+        self.db.execute(f"INSERT INTO devices({cols}) VALUES ({marks})", tuple(device.values()))
+        self.db.commit()
+
+    def device(self, device_id: str) -> dict | None:
+        row = self.db.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
+        return dict(row) if row else None
+
+    def device_by_key(self, public_key: str) -> dict | None:
+        row = self.db.execute("SELECT * FROM devices WHERE public_key = ?", (public_key,)).fetchone()
+        return dict(row) if row else None
+
+    def devices(self, status: str | None = None) -> list[dict]:
+        """Do mais novo para o mais antigo."""
+        if status:
+            rows = self.db.execute("SELECT * FROM devices WHERE status = ? ORDER BY created_at DESC", (status,))
+        else:
+            rows = self.db.execute("SELECT * FROM devices ORDER BY created_at DESC")
+        return [dict(r) for r in rows]
+
+    def update_device(self, device_id: str, **fields) -> None:
+        unknown = set(fields) - DEVICE_FIELDS
+        if unknown:
+            raise ValueError(f"campos inválidos: {unknown}")
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        self.db.execute(f"UPDATE devices SET {sets} WHERE id = ?", (*fields.values(), device_id))
+        self.db.commit()
+
+    def delete_device(self, device_id: str) -> None:
+        self.db.execute("DELETE FROM devices WHERE id = ?", (device_id,))
+        self.db.commit()
+
+    def add_session(self, token_hash: str, device_id: str, created_at: float, expires_at: float) -> None:
+        self.db.execute(
+            "INSERT INTO sessions(token_hash, device_id, created_at, expires_at) VALUES (?,?,?,?)",
+            (token_hash, device_id, created_at, expires_at),
+        )
+        self.db.commit()
+
+    def session(self, token_hash: str) -> dict | None:
+        row = self.db.execute("SELECT * FROM sessions WHERE token_hash = ?", (token_hash,)).fetchone()
+        return dict(row) if row else None
+
+    def extend_session(self, token_hash: str, expires_at: float) -> None:
+        self.db.execute("UPDATE sessions SET expires_at = ? WHERE token_hash = ?", (expires_at, token_hash))
+        self.db.commit()
+
+    def delete_session(self, token_hash: str) -> None:
+        self.db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+        self.db.commit()
+
+    def delete_sessions(self, device_id: str) -> None:
+        self.db.execute("DELETE FROM sessions WHERE device_id = ?", (device_id,))
+        self.db.commit()
+
+    def prune_sessions(self) -> None:
+        self.db.execute("DELETE FROM sessions WHERE expires_at < ?", (time.time(),))
+        self.db.commit()
 
     # ---- chave/valor ----
 

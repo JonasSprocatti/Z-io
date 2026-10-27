@@ -13,6 +13,37 @@
   <link rel="stylesheet" href="/web/app.css">
 </head>
 <body>
+  <section id="pair" class="pair" hidden>
+    <div class="pair-box">
+      <h1>Zóio</h1>
+      <div id="pair-wait">
+        <p>Este aparelho ainda não tem permissão para ver as câmeras.</p>
+        <p class="muted">Código deste aparelho</p>
+        <div id="pair-code" class="pair-code">····-····</div>
+        <label class="field">Nome do aparelho
+          <span class="row"><input id="pair-name" maxlength="60" autocomplete="off"><button id="pair-save" class="ghost" type="button">Salvar</button></span>
+        </label>
+        <div class="card">
+          <strong>Como aprovar</strong>
+          <ol id="pair-steps">
+            <li>Num aparelho já aprovado, abra <b>Ajustes › Aparelhos</b>, toque em <b>Aprovar</b> e digite o código acima.</li>
+            <li>Ou, no Pi: <code id="pair-cmd">sudo zoio aparelhos aprovar</code></li>
+          </ol>
+          <p id="pair-ios" class="muted" hidden>No iPhone, o Safari e o app da Tela de Início contam como aparelhos diferentes. Se for usar pela Tela de Início, peça a aprovação por lá.</p>
+        </div>
+        <p id="pair-status" class="muted">Aguardando aprovação…</p>
+      </div>
+      <div id="pair-revoked" hidden>
+        <p>O acesso deste aparelho foi <b>revogado</b>.</p>
+        <p class="muted">Para voltar, peça para excluírem este aparelho da lista (Ajustes › Aparelhos) e abra o Zóio de novo.</p>
+      </div>
+      <div id="pair-unsupported" hidden>
+        <p>Este navegador não consegue criar a chave do aparelho.</p>
+        <p class="muted">Abra o Zóio pelo endereço <b>https</b> do Pi, num navegador atualizado e fora da janela anônima.</p>
+      </div>
+    </div>
+  </section>
+
   <header class="top">
     <h1>Zóio</h1>
     <span id="status" class="status" title="Estado do servidor"></span>
@@ -72,6 +103,15 @@
       <div class="card">
         <h2>Este aparelho</h2>
         <ul id="device-info" class="kv"></ul>
+        <div id="device-rename" class="row" hidden>
+          <input id="device-name" maxlength="60" aria-label="Nome deste aparelho">
+          <button id="device-name-save" class="ghost" type="button">Renomear</button>
+        </div>
+      </div>
+      <div id="devices-card" class="card" hidden>
+        <h2>Aparelhos</h2>
+        <p class="muted">Só os aparelhos aprovados aqui conseguem abrir o Zóio. Ao aprovar, digite o código que aparece na tela do aparelho novo.</p>
+        <ul id="device-list" class="list"></ul>
       </div>
       <div class="card">
         <h2>Servidor</h2>
@@ -84,7 +124,7 @@
     <a href="#ao-vivo" data-view="live">Ao vivo</a>
     <a href="#gravacoes" data-view="recordings">Gravações</a>
     <a href="#alertas" data-view="alerts">Alertas <span id="alert-badge" class="badge" hidden></span></a>
-    <a href="#ajustes" data-view="settings">Ajustes</a>
+    <a href="#ajustes" data-view="settings">Ajustes <span id="settings-badge" class="badge" hidden></span></a>
   </nav>
 
   <div id="toast" class="toast" hidden></div>

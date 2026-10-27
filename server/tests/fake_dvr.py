@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import struct
+from datetime import datetime
 
 from zoio import dvrip
 
@@ -41,6 +42,7 @@ class FakeDVR:
         self.server: asyncio.Server | None = None
         self.port = 0
         self.queries = 0
+        self.clock = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     async def start(self) -> "FakeDVR":
         self.server = await asyncio.start_server(self._client, "127.0.0.1", 0)
@@ -84,6 +86,8 @@ class FakeDVR:
         elif msgid == dvrip.ALARM_SET:
             self.alarm_writers.append(w)
             self._send(w, msgid + 1, {"Ret": 100, "Name": ""})
+        elif msgid == dvrip.TIME_QUERY:
+            self._send(w, msgid + 1, {"Ret": 100, "Name": "OPTimeQuery", "OPTimeQuery": self.clock})
         elif msgid == dvrip.FILE_QUERY:
             self.queries += 1
             q = req["OPFileQuery"]

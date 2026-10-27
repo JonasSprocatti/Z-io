@@ -81,8 +81,11 @@ class Vapid:
 class Notifier:
     """Envia alertas de movimento, com intervalo mínimo por câmera."""
 
-    def __init__(self, store: Store, contact: str, cooldown: int, channels: set[int]):
+    def __init__(self, store: Store, contact: str, cooldown: int, channels: set[int], approved_only: bool = False):
         self.store = store
+        # Com a aprovação de aparelhos ligada, só aparelhos aprovados recebem avisos.
+        self.approved_only = approved_only
+        self._last_device_alert = 0.0
         self.vapid = Vapid(store, contact)
         self.cooldown = cooldown
         self.channels = channels
@@ -108,9 +111,25 @@ class Notifier:
             {"title": f"Movimento: {name}", "body": time.strftime("%H:%M:%S"), "camera": camera, "event": event_id, "tag": f"cam{camera}"}
         ).encode()
         sent = 0
-        for item in self.store.subscriptions():
+        for item in self.store.subscriptions(approved_only=self.approved_only):
             if item["cameras"] and camera not in item["cameras"]:
                 continue
+            if await self.send(item["sub"], payload):
+                sent += 1
+        return sent
+
+    async def device_request(self, name: str, code: str) -> int:
+        """Avisa os aparelhos administradores que um aparelho novo pediu acesso."""
+        now = time.time()
+        if now - self._last_device_alert < 60:  # evita enxurrada de pedidos
+            return 0
+        self._last_device_alert = now
+        payload = json.dumps(
+            {"title": "Aparelho novo pedindo acesso", "body": f"{name} · código {code}", "tag": "aparelho", "url": "/#ajustes"},
+            ensure_ascii=False,
+        ).encode()
+        sent = 0
+        for item in self.store.subscriptions(admins_only=True):
             if await self.send(item["sub"], payload):
                 sent += 1
         return sent

@@ -31,7 +31,8 @@ async def go2rtc(aiohttp_server):
 
 @pytest.fixture
 async def client(aiohttp_client, make_cfg, go2rtc):
-    cfg = make_cfg(1, allowed_users={"jonas@github"}, alerts=False)
+    # A aprovação de aparelhos tem testes próprios (test_devices.py).
+    cfg = make_cfg(1, allowed_users={"jonas@github"}, alerts=False, device_approval=False)
     cfg.go2rtc_url = str(go2rtc.make_url("")).rstrip("/")
     return await aiohttp_client(create_app(cfg))
 

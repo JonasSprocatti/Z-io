@@ -56,3 +56,25 @@ def test_cooldown_and_channel_filter(tmp_path):
     assert not n.should_notify(1, now=1100)
     assert n.should_notify(1, now=1301)
     assert not n.should_notify(3, now=1000)
+
+
+async def test_device_request_goes_to_admins_and_is_throttled(tmp_path):
+    store = Store(tmp_path / "z.db")
+    n = push.Notifier(store, "mailto:x", cooldown=300, channels=set(), approved_only=True)
+    store.add_device({"id": "a1", "name": "Admin", "public_key": "k1", "code": "AAAA-AAAA", "status": "approved", "admin": 1, "created_at": 1})
+    store.add_device({"id": "c1", "name": "Comum", "public_key": "k2", "code": "BBBB-BBBB", "status": "approved", "admin": 0, "created_at": 2})
+    store.save_subscription({"endpoint": "https://p/admin", "keys": {}}, None, None, "a1")
+    store.save_subscription({"endpoint": "https://p/comum", "keys": {}}, None, None, "c1")
+    sent = []
+
+    async def fake_send(sub, payload):
+        sent.append((sub["endpoint"], json.loads(payload)))
+        return True
+
+    n.send = fake_send
+    assert await n.device_request("Tablet", "CCCC-CCCC") == 1
+    assert sent[0][0] == "https://p/admin" and "CCCC-CCCC" in sent[0][1]["body"] and sent[0][1]["url"] == "/#ajustes"
+    assert await n.device_request("Outro", "DDDD-DDDD") == 0  # menos de 1 minuto depois
+    # movimento vai para os dois aprovados
+    sent.clear()
+    assert await n.motion(1, "Portão", 1) == 2
