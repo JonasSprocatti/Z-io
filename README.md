@@ -24,7 +24,7 @@ Mais detalhes em [docs/arquitetura.md](docs/arquitetura.md).
 
 ## Instalação no Raspberry Pi
 
-Pré-requisitos: Pi na mesma rede do DVR, com o Tailscale ligado. No painel do Tailscale, ative **MagicDNS** e **HTTPS Certificates** (em DNS).
+Pré-requisitos: Pi na mesma rede do DVR, com o Tailscale ligado. No painel do Tailscale, ative **MagicDNS** e **HTTPS Certificates** (em DNS). Na primeira vez, o Tailscale também pede para liberar o **Serve** na sua conta: o instalador mostra o link, e depois é só rodar o comando que ele indica.
 
 ```bash
 git clone https://github.com/JonasSprocatti/Z-io.git ~/zoio

@@ -86,12 +86,16 @@ systemctl restart zoio-go2rtc zoio
 
 echo "==> Acesso pelo Tailscale (só aparelhos da sua rede Tailscale)"
 if command -v tailscale >/dev/null; then
-  if tailscale serve --bg --https=443 http://127.0.0.1:8080 >/dev/null 2>&1; then
+  # Se o Serve ainda não foi liberado na conta, o tailscale mostra um link e
+  # fica esperando. O timeout evita que o instalador trave nesse ponto.
+  if SERVE_OUT="$(timeout 20 tailscale serve --bg --https=443 http://127.0.0.1:8080 2>&1)"; then
     NAME="$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
     echo "    Abra https://$NAME no celular ou no computador (com o Tailscale ligado)."
   else
-    echo "    Não consegui ativar o 'tailscale serve'. Ative MagicDNS e HTTPS em"
-    echo "    https://login.tailscale.com/admin/dns e rode: sudo tailscale serve --bg --https=443 http://127.0.0.1:8080"
+    echo "    Não consegui ativar o 'tailscale serve'. O Tailscale respondeu:"
+    printf '%s\n' "$SERVE_OUT" | grep -v '^\s*$' | tail -n 6 | sed 's/^/      /' || true
+    echo "    Libere o Serve pelo link acima (ou ative MagicDNS e HTTPS em https://login.tailscale.com/admin/dns)"
+    echo "    e rode: sudo tailscale serve --bg --https=443 http://127.0.0.1:8080"
   fi
 else
   echo "    Tailscale não encontrado."

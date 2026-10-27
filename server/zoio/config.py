@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,12 +24,20 @@ def read_env_file(path: str | Path) -> dict[str, str]:
         if line.startswith("export "):
             line = line[len("export ") :]
         key, _, raw = line.partition("=")
+        values[key.strip()] = _env_value(raw.strip())
+    return values
+
+
+def _env_value(raw: str) -> str:
+    """Valor entre aspas segue as regras do shell. Sem aspas, vale o resto da
+    linha (com espaços, como `Câmera 1,Câmera 2`), até um ` #` de comentário."""
+    if raw[:1] in ("'", '"'):
         try:
             parts = shlex.split(raw, comments=True)
+            return parts[0] if parts else ""
         except ValueError:
-            parts = [raw]
-        values[key.strip()] = parts[0] if parts else ""
-    return values
+            pass
+    return re.split(r"\s+#", raw, maxsplit=1)[0].strip()
 
 
 @dataclass
