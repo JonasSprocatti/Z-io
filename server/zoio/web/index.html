@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e1116">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Zóio</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/web/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/web/icons/icon-180.png">
+  <link rel="stylesheet" href="/web/app.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Zóio</h1>
+    <span id="status" class="status" title="Estado do servidor"></span>
+    <div class="layout" id="layout-picker" role="group" aria-label="Câmeras por linha">
+      <button data-cols="1" aria-label="1 por linha">1</button>
+      <button data-cols="2" aria-label="2 por linha">2</button>
+      <button data-cols="3" aria-label="3 por linha">3</button>
+      <button data-cols="4" aria-label="4 por linha">4</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-live" class="view">
+      <div id="grid" class="grid"></div>
+    </section>
+
+    <section id="view-single" class="view" hidden>
+      <div class="single-bar">
+        <button id="single-back" class="ghost">‹ Voltar</button>
+        <strong id="single-name"></strong>
+        <button id="single-rec" class="ghost">Gravações</button>
+      </div>
+      <div id="single-video" class="single-video"></div>
+    </section>
+
+    <section id="view-recordings" class="view" hidden>
+      <form id="rec-form" class="toolbar">
+        <select id="rec-camera" aria-label="Câmera"></select>
+        <input id="rec-date" type="date" aria-label="Dia">
+        <label class="check"><input id="rec-motion" type="checkbox"> só movimento</label>
+        <button type="submit">Buscar</button>
+      </form>
+      <div id="player" class="player" hidden>
+        <div id="player-status"></div>
+        <video id="player-video" controls playsinline hidden></video>
+        <a id="player-download" class="ghost" hidden>Baixar MP4</a>
+      </div>
+      <ul id="rec-list" class="list"></ul>
+    </section>
+
+    <section id="view-alerts" class="view" hidden>
+      <ul id="alert-list" class="list"></ul>
+      <button id="alert-more" class="ghost wide" hidden>Carregar mais</button>
+    </section>
+
+    <section id="view-settings" class="view" hidden>
+      <div class="card">
+        <h2>Notificações</h2>
+        <p id="push-info" class="muted"></p>
+        <div id="push-cameras" class="chips"></div>
+        <div class="row">
+          <button id="push-on">Ativar neste aparelho</button>
+          <button id="push-test" class="ghost" hidden>Testar</button>
+          <button id="push-off" class="ghost" hidden>Desativar</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Este aparelho</h2>
+        <ul id="device-info" class="kv"></ul>
+      </div>
+      <div class="card">
+        <h2>Servidor</h2>
+        <ul id="server-info" class="kv"></ul>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabs">
+    <a href="#ao-vivo" data-view="live">Ao vivo</a>
+    <a href="#gravacoes" data-view="recordings">Gravações</a>
+    <a href="#alertas" data-view="alerts">Alertas <span id="alert-badge" class="badge" hidden></span></a>
+    <a href="#ajustes" data-view="settings">Ajustes</a>
+  </nav>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/web/app.js"></script>
+</body>
+</html>

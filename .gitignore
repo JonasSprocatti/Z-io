@@ -6,3 +6,4 @@ build/
 .venv/
 *.env
 !deploy/zoio.env.example
+uv.lock

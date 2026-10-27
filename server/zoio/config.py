@@ -1,0 +1,119 @@
+"""Configuração lida de variáveis de ambiente e de um arquivo .env opcional."""
+
+from __future__ import annotations
+
+import os
+import shlex
+from dataclasses import dataclass, field
+from pathlib import Path
+
+DEFAULT_ENV_FILE = "/etc/zoio/zoio.env"
+
+
+def read_env_file(path: str | Path) -> dict[str, str]:
+    """Lê linhas KEY=VALOR (aceita `export`, aspas e comentários)."""
+    values: dict[str, str] = {}
+    p = Path(path)
+    if not p.is_file():
+        return values
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :]
+        key, _, raw = line.partition("=")
+        try:
+            parts = shlex.split(raw, comments=True)
+        except ValueError:
+            parts = [raw]
+        values[key.strip()] = parts[0] if parts else ""
+    return values
+
+
+@dataclass
+class Camera:
+    number: int  # 1..N, como aparece no DVR e na URL RTSP
+    name: str
+
+    @property
+    def main(self) -> str:
+        return f"cam{self.number}"
+
+    @property
+    def sub(self) -> str:
+        return f"cam{self.number}_sub"
+
+
+@dataclass
+class Config:
+    dvr_host: str
+    dvr_user: str
+    dvr_pass: str
+    dvr_port: int = 34567
+    rtsp_port: int = 554
+    cameras: list[Camera] = field(default_factory=list)
+    listen_host: str = "127.0.0.1"
+    listen_port: int = 8080
+    go2rtc_url: str = "http://127.0.0.1:1984"
+    data_dir: Path = Path("/var/lib/zoio")
+    allowed_users: set[str] = field(default_factory=set)
+    alerts: bool = True
+    notify_channels: set[int] = field(default_factory=set)  # vazio = todas
+    notify_cooldown: int = 300
+    cache_max_mb: int = 2048
+    push_contact: str = "mailto:zoio@localhost"
+
+    @property
+    def rtsp_base(self) -> str:
+        return f"rtsp://{self.dvr_host}:{self.rtsp_port}"
+
+    def rtsp_url(self, number: int, sub: bool) -> str:
+        return (
+            f"{self.rtsp_base}/user={self.dvr_user}&password={self.dvr_pass}"
+            f"&channel={number}&stream={1 if sub else 0}.sdp?real_stream"
+        )
+
+    def camera(self, number: int) -> Camera | None:
+        return next((c for c in self.cameras if c.number == number), None)
+
+
+def _int_set(raw: str) -> set[int]:
+    return {int(x) for x in raw.replace(" ", "").split(",") if x}
+
+
+def load(env_file: str | None = None) -> Config:
+    env = read_env_file(env_file or os.environ.get("ZOIO_ENV_FILE", DEFAULT_ENV_FILE))
+    env.update({k: v for k, v in os.environ.items() if k.startswith(("DVR_", "ZOIO_", "GO2RTC_"))})
+
+    missing = [k for k in ("DVR_HOST", "DVR_USER", "DVR_PASS") if not env.get(k)]
+    if missing:
+        raise SystemExit(f"Configuração incompleta, faltam: {', '.join(missing)}")
+
+    count = int(env.get("ZOIO_CHANNELS", "8"))
+    names = [n.strip() for n in env.get("ZOIO_CHANNEL_NAMES", "").split(",")]
+    hidden = _int_set(env.get("ZOIO_HIDE_CHANNELS", ""))
+    cameras = [
+        Camera(i, names[i - 1] if i - 1 < len(names) and names[i - 1] else f"Câmera {i}")
+        for i in range(1, count + 1)
+        if i not in hidden
+    ]
+    host, _, port = env.get("ZOIO_LISTEN", "127.0.0.1:8080").rpartition(":")
+    return Config(
+        dvr_host=env["DVR_HOST"],
+        dvr_user=env["DVR_USER"],
+        dvr_pass=env["DVR_PASS"],
+        dvr_port=int(env.get("DVR_PORT", "34567")),
+        rtsp_port=int(env.get("DVR_RTSP_PORT", "554")),
+        cameras=cameras,
+        listen_host=host or "127.0.0.1",
+        listen_port=int(port),
+        go2rtc_url=env.get("GO2RTC_URL", "http://127.0.0.1:1984").rstrip("/"),
+        data_dir=Path(env.get("ZOIO_DATA_DIR", "/var/lib/zoio")),
+        allowed_users={u.strip().lower() for u in env.get("ZOIO_ALLOWED_USERS", "").split(",") if u.strip()},
+        alerts=env.get("ZOIO_ALERTS", "1") not in ("0", "false", "no", "nao", "não"),
+        notify_channels=_int_set(env.get("ZOIO_NOTIFY_CHANNELS", "")),
+        notify_cooldown=int(env.get("ZOIO_NOTIFY_COOLDOWN", "300")),
+        cache_max_mb=int(env.get("ZOIO_CACHE_MAX_MB", "2048")),
+        push_contact=env.get("ZOIO_PUSH_CONTACT", "mailto:zoio@localhost"),
+    )
