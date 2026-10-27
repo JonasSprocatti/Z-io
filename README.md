@@ -46,10 +46,11 @@ sudo nano /etc/zoio/zoio.env
 sudo systemctl restart zoio-go2rtc zoio
 ```
 
-Para testar a conexão com o DVR (login, gravações das últimas 24h e 15 s de alarmes):
+Para testar a conexão com o DVR (login, relógio, gravações das últimas 24h e 15 s de alarmes):
 
 ```bash
 sudo zoio check
+sudo zoio check --baixar   # também baixa o começo da gravação mais recente e converte para MP4
 ```
 
 ## Aparelhos autorizados

@@ -116,3 +116,23 @@ async def test_alarms_reach_store_bus_and_notifier(make_cfg, tmp_path):
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await dvr.stop()
+
+
+async def test_check_reports_clock_files_alarms_and_download(make_cfg, hevc_es, capsys):
+    from datetime import datetime, timedelta
+
+    from zoio.__main__ import check
+
+    start = datetime.now() - timedelta(hours=1)
+    fmt = "%Y-%m-%d %H:%M:%S"
+    files = [{"Channel": 1, "BeginTime": start.strftime(fmt), "EndTime": (start + timedelta(minutes=5)).strftime(fmt), "FileLength": "0x00000400", "FileName": "/idea0/ch2[M].h264"}]
+    dvr = await FakeDVR(files=files, recording=wrap_annexb(hevc_es)).start()
+    try:
+        failures = await check(make_cfg(dvr.port), download=True, alarm_seconds=0.1)
+    finally:
+        await dvr.stop()
+    out = capsys.readouterr().out
+    assert failures == 0, out
+    assert "login ok" in out and "relógio do DVR:" in out and "atenção" not in out
+    assert "Câmera 2: 1 gravações" in out and "ch2[M]" in out
+    assert "MP4 ok" in out and "hevc" in out

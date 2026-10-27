@@ -61,7 +61,7 @@ Exceções sem sessão: a "casca" do app (`/`, `/web/*`, `/sw.js`, manifesto), o
 
 ## Próximos passos
 
-1. Instalar no Pi e validar com o DVR real (o `zoio check` testa login, busca e alarmes).
+1. Instalar no Pi e validar com o DVR real (o `zoio check --baixar` testa login, relógio, busca, alarmes e download).
 2. Miniatura (snapshot) nos alertas, se o DVR aceitar `OPSNAP`. Senão, um quadro do go2rtc.
 3. Linha do tempo do dia por câmera, com marcações de movimento.
 4. Fase 2: botão para abrir o portão (ESP32 + relé, ESPHome, API só local).

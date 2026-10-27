@@ -28,6 +28,7 @@ PLAYBACK = 1420
 PLAYBACK_CLAIM = 1424
 PLAYBACK_DATA = 1426
 FILE_QUERY = 1440
+TIME_QUERY = 1452
 ALARM_SET = 1500
 ALARM_INFO = 1504
 
@@ -212,6 +213,13 @@ class Connection:
         reply = await self.request(ALARM_SET, {"Name": "", "SessionID": f"0x{self.session:08X}"})
         if reply.get("Ret") not in OK:
             raise DVRIPError(f"DVR recusou a inscrição de alarmes ({reply.get('Ret')})")
+
+    async def clock(self) -> str:
+        """Hora atual do DVR, como ele mostra ('AAAA-MM-DD HH:MM:SS')."""
+        reply = await self.request(TIME_QUERY, {"Name": "OPTimeQuery", "SessionID": f"0x{self.session:08X}"})
+        if reply.get("Ret") not in OK:
+            raise DVRIPError(f"DVR recusou a consulta da hora ({reply.get('Ret')})")
+        return str(reply.get("OPTimeQuery", ""))
 
     async def query_files(self, channel: int, begin: str, end: str, kind: str = "h264") -> list[dict]:
         """Lista arquivos gravados. `channel` começa em 0; horários 'AAAA-MM-DD HH:MM:SS'."""
