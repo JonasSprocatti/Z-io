@@ -66,8 +66,9 @@ async function post(path, body) {
     body: JSON.stringify(body ?? {}),
     credentials: 'same-origin',
   });
+  const text = await res.text();
   let data = {};
-  try { data = await res.json(); } catch { /* corpo vazio ou texto */ }
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text }; }
   return { status: res.status, data };
 }
 
@@ -99,4 +100,14 @@ export async function login(rec) {
 export async function rename(rec, name) {
   rec.name = name;
   await save(rec);
+}
+
+// Abrir o portão pede uma assinatura nova, além da sessão: só o aparelho que
+// guarda a chave consegue, e cada desafio vale uma vez.
+export async function openGate(rec) {
+  const ch = await post('/api/gate/challenge');
+  if (ch.status !== 200) return ch;
+  const message = new TextEncoder().encode(`zoio-portao\n${ch.data.nonce}\n${rec.id}`);
+  const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, rec.keyPair.privateKey, message);
+  return post('/api/gate/open', { nonce: ch.data.nonce, signature: b64u(signature) });
 }

@@ -71,6 +71,12 @@ Detalhes que importam:
 
 Para atualizar: `git pull && sudo ./deploy/install.sh`.
 
+## Portão
+
+O Zóio também abre o portão da rua, com uma placa ESP32 + relé (ESPHome) ligada no botão de abrir do porteiro. O botão **Portão** aparece no topo do app só nos aparelhos com essa permissão. É preciso segurar até completar o círculo, e cada abertura fica em Alertas com quem abriu e uma foto da câmera do portão.
+
+Sem a placa configurada, nada disso aparece. Peças, ligação, programação da placa e configuração estão em [docs/portao.md](docs/portao.md).
+
 ## Ajustes recomendados no DVR
 
 - **Fluxo secundário em H.264.** O DVR manda tudo em H.265. Safari e Chrome com aceleração de vídeo tocam H.265, mas Firefox e alguns aparelhos não. Com o secundário em H.264, a grade toca em qualquer lugar. A gravação continua em H.265.
@@ -93,8 +99,8 @@ pip install -e '.[test]'
 pytest
 ```
 
-Os testes usam um DVR simulado (`tests/fake_dvr.py`), que fala DVRIP, e um go2rtc simulado. Eles cobrem login, busca paginada, download e conversão para MP4 (conferida com o ffprobe), alarmes, Web Push, controle de acesso, o proxy do ao vivo e a aprovação de aparelhos (assinaturas, desafio de uso único, revogação e linha de comando).
+Os testes usam um DVR simulado (`tests/fake_dvr.py`), que fala DVRIP, uma placa ESPHome simulada (`tests/fake_esphome.py`) e um go2rtc simulado. Eles cobrem login, busca paginada, download e conversão para MP4 (conferida com o ffprobe), alarmes, Web Push, controle de acesso, o proxy do ao vivo, a aprovação de aparelhos (assinaturas, desafio de uso único, revogação e linha de comando) e o portão (criptografia da API do ESPHome, permissão, assinatura a cada abertura, registro e foto).
 
 ## Próximas fases
 
-- Abrir o portão pelo app (ESP32 + relé). Veja a lista de compras da fase 2.
+- Portão: falta a placa. O software está pronto e espera as peças e a confirmação da ligação.

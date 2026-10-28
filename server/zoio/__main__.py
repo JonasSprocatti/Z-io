@@ -1,4 +1,4 @@
-"""Linha de comando: `python -m zoio serve | go2rtc-config ARQUIVO | check | aparelhos`."""
+"""Linha de comando: `python -m zoio serve | go2rtc-config ARQUIVO | check | aparelhos | portao`."""
 
 from __future__ import annotations
 
@@ -11,10 +11,14 @@ import sys
 import time
 from datetime import datetime, timedelta
 
+import aiohttp
 from aiohttp import web
 
-from . import clips, config, devices, dvrip, go2rtc
+from . import clips, config, devices, dvrip, esphome, go2rtc
+from .alarms import EventBus
 from .app import create_app
+from .esphome import EspHomeError
+from .gate import Gate, GateError
 from .store import Store
 from .xmstream import Demuxer
 
@@ -115,7 +119,7 @@ async def check_download(cfg: config.Config, cam: config.Camera, entry: dict, li
     print(f"  MP4 ok: {out} ({' | '.join(stdout.decode().split())})")
 
 
-def manage_devices(cfg: config.Config, action: str | None, ref: str | None, common: bool) -> int:
+def manage_devices(cfg: config.Config, action: str | None, ref: str | None, common: bool, deny: bool = False) -> int:
     """Lista, aprova ou revoga aparelhos direto no banco (o servidor vê na hora)."""
     store = Store(cfg.data_dir / "zoio.db")
     manager = devices.Devices(store, cfg.session_days)
@@ -126,8 +130,8 @@ def manage_devices(cfg: config.Config, action: str | None, ref: str | None, comm
                 print("Nenhum aparelho cadastrado. Abra o Zóio no aparelho para ele aparecer aqui.")
             for d in items:
                 seen = datetime.fromtimestamp(d["last_seen"]).strftime("%d/%m %H:%M") if d["last_seen"] else "nunca"
-                admin = " (admin)" if d["admin"] else ""
-                print(f"{d['code']}  {STATUS.get(d['status'], d['status']):<10} {d['name']}{admin}  · visto: {seen}  · id {d['id']}")
+                extras = (" (admin)" if d["admin"] else "") + (" (portão)" if d["gate"] else "")
+                print(f"{d['code']}  {STATUS.get(d['status'], d['status']):<10} {d['name']}{extras}  · visto: {seen}  · id {d['id']}")
             if not cfg.device_approval:
                 print("Atenção: a aprovação de aparelhos está desligada (ZOIO_DEVICE_APPROVAL=0).")
             return 0
@@ -145,12 +149,50 @@ def manage_devices(cfg: config.Config, action: str | None, ref: str | None, comm
         elif action == "excluir":
             manager.delete(device["id"])
             print(f"Excluído: {device['name']} ({device['code']}). Ele pode pedir acesso de novo.")
+        elif action == "portao":
+            device = manager.set_gate(device["id"], not deny)
+            print(f"{device['name']} ({device['code']}) {'pode' if device['gate'] else 'não pode mais'} abrir o portão.")
         return 0
     except devices.DeviceError as exc:
         print(f"Erro: {exc}", file=sys.stderr)
         return 1
     finally:
         store.close()
+
+
+def manage_gate(cfg: config.Config, action: str) -> int:
+    """Testa a placa do portão ou abre pelo Pi."""
+    if cfg.gate_error:
+        print(f"Erro na configuração: {cfg.gate_error}", file=sys.stderr)
+        return 1
+    if not cfg.gate_enabled:
+        print("Portão não configurado: defina ZOIO_GATE_HOST e ZOIO_GATE_KEY no /etc/zoio/zoio.env.", file=sys.stderr)
+        return 1
+
+    async def run() -> int:
+        store = Store(cfg.data_dir / "zoio.db")
+        gate = Gate(cfg, store, EventBus())
+        try:
+            if action == "testar":
+                info = await gate.check()
+                print(f"Placa {info['name']} ({info['mac'] or 'MAC ?'}), {info['version']}")
+                print(f"  botões: {', '.join(info['buttons']) or 'nenhum'}")
+                print("  ok: o botão configurado existe." if info["button_ok"] else f"  atenção: não achei o botão {cfg.gate_button!r}.")
+                return 0 if info["button_ok"] else 1
+            async with aiohttp.ClientSession() as http:
+                event = await gate.open("Pi", None, http)
+            if event["detail"]["error"]:
+                print(f"Falhou: {event['detail']['error']}", file=sys.stderr)
+                return 1
+            print("Portão aberto." + (" Foto salva." if event["detail"]["photo"] else ""))
+            return 0
+        except (EspHomeError, GateError) as exc:
+            print(f"Erro: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            store.close()
+
+    return asyncio.run(run())
 
 
 def main() -> None:
@@ -164,10 +206,18 @@ def main() -> None:
     c = sub.add_parser("check", help="testa a conexão com o DVR")
     c.add_argument("--baixar", action="store_true", help="também baixa o começo da gravação mais recente e converte para MP4")
     d = sub.add_parser("aparelhos", help="lista, aprova ou revoga aparelhos")
-    d.add_argument("acao", nargs="?", choices=["listar", "aprovar", "revogar", "excluir"])
+    d.add_argument("acao", nargs="?", choices=["listar", "aprovar", "revogar", "excluir", "portao"])
     d.add_argument("codigo", nargs="?", help="código mostrado no aparelho (ex.: ABCD-EFGH) ou id")
-    d.add_argument("--comum", action="store_true", help="aprova sem permissão de aprovar outros aparelhos")
+    d.add_argument("--comum", action="store_true", help="aprova sem permissão de aprovar outros aparelhos nem de abrir o portão")
+    d.add_argument("--nao", action="store_true", help="com 'portao': tira a permissão de abrir o portão")
+    pt = sub.add_parser("portao", help="placa do portão: gerar chave, testar ou abrir")
+    pt.add_argument("acao", choices=["chave", "testar", "abrir"])
     args = parser.parse_args()
+
+    if args.cmd == "portao" and args.acao == "chave":  # não precisa da configuração
+        print(esphome.new_key())
+        print("Use a mesma chave em ZOIO_GATE_KEY (/etc/zoio/zoio.env) e em api_key (secrets da placa).", file=sys.stderr)
+        return
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
@@ -180,7 +230,9 @@ def main() -> None:
     elif args.cmd == "check":
         sys.exit(1 if asyncio.run(check(cfg, download=args.baixar)) else 0)
     elif args.cmd == "aparelhos":
-        sys.exit(manage_devices(cfg, args.acao, args.codigo, args.comum))
+        sys.exit(manage_devices(cfg, args.acao, args.codigo, args.comum, args.nao))
+    elif args.cmd == "portao":
+        sys.exit(manage_gate(cfg, args.acao))
 
 
 if __name__ == "__main__":

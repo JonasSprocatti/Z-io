@@ -270,9 +270,27 @@ function renderRecordings(params) {
 
 // ------------------------------------------------------------------ alertas
 
+function showPhoto(eventId) {
+  const box = $('#lightbox');
+  box.querySelector('img').src = `/api/gate/photos/${eventId}.jpg`;
+  box.hidden = false;
+}
+
+function gateItem(ev, when, date) {
+  const d = ev.detail ?? {};
+  const ok = ev.status === 'Aberto';
+  return el('li', {},
+    d.photo ? el('img', { class: 'thumb', src: `/api/gate/photos/${ev.id}.jpg`, alt: 'Foto do portão', loading: 'lazy', onclick: () => showPhoto(ev.id) }) : null,
+    el('div', { class: 'main' },
+      el('div', {}, ok ? 'Portão aberto ' : 'Portão não abriu ', el('span', { class: ok ? 'tag gate' : 'tag' }, 'portão')),
+      el('div', { class: 'sub' }, [`por ${d.by ?? '?'}`, when.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }), ok ? null : d.error].filter(Boolean).join(' · '))),
+    ev.camera ? el('a', { class: 'ghost', href: `#gravacoes?cam=${ev.camera}&date=${date}` }, 'Gravação') : null);
+}
+
 function alertItem(ev) {
   const when = new Date(ev.received_at * 1000);
   const date = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
+  if (ev.kind === 'Portao') return gateItem(ev, when, date);
   return el('li', {},
     el('div', { class: 'main' },
       el('div', {}, ev.name ?? camName(ev.camera), ' ', el('span', { class: 'tag' }, ev.kind === 'VideoMotion' ? 'movimento' : ev.kind)),
@@ -305,6 +323,15 @@ function listenEvents() {
     if (ev.type === 'device') {
       if (ev.status === 'pending') toast(`Aparelho novo pedindo acesso: ${ev.name}. Aprove em Ajustes.`, 6000);
       refreshDevices();
+      return;
+    }
+    if (ev.type === 'gate') {
+      const list = $('#alert-list');
+      list.querySelector('.empty')?.remove();
+      if (list.childElementCount) list.prepend(alertItem(ev));
+      if (ev.detail?.device_id !== state.me?.device?.id) {
+        toast(ev.status === 'Aberto' ? `Portão aberto por ${ev.detail?.by}.` : `Tentativa de abrir o portão falhou (${ev.detail?.by}).`, 5000);
+      }
       return;
     }
     if (ev.type !== 'motion') return;
@@ -387,6 +414,102 @@ async function disablePush() {
   renderPush();
 }
 
+// ------------------------------------------------------------------ portão
+
+const HOLD_MS = 1200;
+
+function setupGate() {
+  const gate = state.config.gate;
+  $('#gate-btn').hidden = !(gate?.enabled && gate.allowed);
+}
+
+async function openGateSheet() {
+  $('#gate').hidden = false;
+  resetHold('Segure para abrir', 'Mantenha o botão apertado até completar o círculo.');
+  const cam = state.cameras.find((c) => c.number === state.config.gate?.camera);
+  const box = $('#gate-video');
+  box.replaceChildren();
+  if (cam) {
+    await loadPlayer().catch(() => {});
+    if (!$('#gate').hidden) box.replaceChildren(makeStream(cam.sub, { controls: false }));
+  }
+}
+
+function closeGateSheet() {
+  $('#gate').hidden = true;
+  $('#gate-video').replaceChildren(); // desliga o vídeo
+}
+
+function resetHold(label, status) {
+  const btn = $('#gate-hold');
+  btn.classList.remove('done', 'failed');
+  btn.style.setProperty('--p', 0);
+  btn.disabled = false;
+  $('#gate-hold-label').textContent = label;
+  if (status !== undefined) $('#gate-status').textContent = status;
+}
+
+// Segurar evita abrir o portão com um toque sem querer (no bolso, por exemplo).
+function bindHold(btn, action) {
+  let start = 0;
+  let raf = 0;
+  const stop = () => {
+    if (!raf) return;
+    cancelAnimationFrame(raf);
+    raf = 0;
+    btn.style.setProperty('--p', 0);
+  };
+  const tick = (t) => {
+    const p = Math.min(1, (t - start) / HOLD_MS);
+    btn.style.setProperty('--p', p);
+    if (p < 1) { raf = requestAnimationFrame(tick); return; }
+    raf = 0;
+    action();
+  };
+  const begin = (e) => {
+    if (btn.disabled || raf) return;
+    e.preventDefault();
+    start = performance.now();
+    raf = requestAnimationFrame(tick);
+  };
+  btn.addEventListener('pointerdown', (e) => { btn.setPointerCapture?.(e.pointerId); begin(e); });
+  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(name, stop);
+  btn.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) begin(e); });
+  btn.addEventListener('keyup', (e) => { if (e.key === ' ' || e.key === 'Enter') stop(); });
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+async function doOpenGate() {
+  const btn = $('#gate-hold');
+  btn.disabled = true;
+  $('#gate-hold-label').textContent = 'Abrindo…';
+  $('#gate-status').textContent = '';
+  let res;
+  try {
+    const rec = await device.identity();
+    res = await device.openGate(rec);
+    if (res.status === 401 && res.data?.error === 'aparelho_nao_autorizado') { // sessão vencida
+      await ensureSession();
+      res = await device.openGate(rec);
+    }
+  } catch (err) {
+    res = { status: 0, data: { error: err.message } };
+  }
+  if (res.status === 200) {
+    btn.classList.add('done');
+    $('#gate-hold-label').textContent = 'Aberto';
+    const at = new Date(res.data.received_at * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    $('#gate-status').textContent = `Portão aberto às ${at}.`;
+    navigator.vibrate?.(80);
+    setTimeout(() => { if (!$('#gate').hidden) resetHold('Segure para abrir'); }, 6000);
+  } else {
+    btn.classList.add('failed');
+    $('#gate-hold-label').textContent = 'Não abriu';
+    $('#gate-status').textContent = `Não consegui abrir: ${res.data?.detail?.error ?? res.data?.error ?? `erro ${res.status}`}`;
+    setTimeout(() => { if (!$('#gate').hidden) resetHold('Tentar de novo'); }, 3000);
+  }
+}
+
 // ------------------------------------------------------------------ ajustes
 
 function hevcSupport() {
@@ -436,20 +559,45 @@ function deviceItem(d) {
   if (d.status === 'pending') actions.push(el('button', { class: 'ghost', onclick: () => act('revoke', `Recusar o pedido de "${d.name}"?`) }, 'Recusar'));
   if (d.status === 'approved' && !d.current) actions.push(el('button', { class: 'ghost', onclick: () => act('revoke', `Revogar "${d.name}"? Ele perde o acesso na hora.`) }, 'Revogar'));
   if (d.status === 'revoked') actions.push(el('button', { class: 'ghost', onclick: () => act('delete', `Excluir "${d.name}"? Ele poderá pedir acesso de novo.`) }, 'Excluir'));
+  const gateOn = state.config.gate?.enabled;
+  if (gateOn && d.status === 'approved') {
+    actions.push(el('button', { class: 'ghost', onclick: () => setGatePermission(d, !d.gate) }, d.gate ? 'Bloquear portão' : 'Liberar portão'));
+  }
   return el('li', {},
     el('div', { class: 'main' },
-      el('div', {}, d.name, d.current ? ' (este aparelho) ' : ' ', el('span', { class: `tag ${cls}` }, label)),
+      el('div', {}, d.name, d.current ? ' (este aparelho) ' : ' ', el('span', { class: `tag ${cls}` }, label),
+        gateOn && d.status === 'approved' && d.gate ? el('span', { class: 'tag gate' }, 'portão') : null),
       el('div', { class: 'sub' }, details)),
     el('div', { class: 'dev-actions' }, ...actions));
+}
+
+async function setGatePermission(d, allow) {
+  const question = allow ? `Deixar "${d.name}" abrir o portão?` : `Tirar de "${d.name}" a permissão de abrir o portão?`;
+  if (!confirm(question)) return;
+  try {
+    await api(`/api/devices/${d.id}/gate`, { method: 'POST', body: { allow } });
+    if (d.current) {
+      state.config = await api('/api/config');
+      state.me.device = state.config.device;
+      setupGate();
+    }
+  } catch (err) {
+    toast(err.message);
+  }
+  refreshDevices();
 }
 
 function approveForm() {
   const code = el('input', { type: 'text', placeholder: 'ABCD-EFGH', maxlength: 9, autocomplete: 'off', 'aria-label': 'Código do aparelho novo' });
   const admin = el('input', { type: 'checkbox' });
+  const gate = el('input', { type: 'checkbox' });
+  const gateOn = state.config.gate?.enabled;
   const submit = async (e) => {
     e.preventDefault();
+    const body = { code: code.value, admin: admin.checked };
+    if (gateOn) body.gate = gate.checked;
     try {
-      const d = await api('/api/devices/approve', { method: 'POST', body: { code: code.value, admin: admin.checked } });
+      const d = await api('/api/devices/approve', { method: 'POST', body });
       toast(`Aprovado: ${d.name}.`);
       code.value = '';
     } catch (err) {
@@ -462,7 +610,8 @@ function approveForm() {
       el('div', {}, 'Aprovar aparelho novo'),
       el('div', { class: 'sub' }, 'Digite o código que aparece na tela dele.'),
       el('div', { class: 'dev-approve' }, code, el('button', { type: 'submit' }, 'Aprovar')),
-      el('label', { class: 'check' }, admin, 'pode aprovar outros aparelhos')));
+      el('label', { class: 'check' }, admin, 'pode aprovar outros aparelhos'),
+      gateOn ? el('label', { class: 'check' }, gate, 'pode abrir o portão') : null));
 }
 
 async function refreshDevices() {
@@ -485,6 +634,7 @@ async function renderSettings() {
   const me = state.me?.device;
   $('#device-info').replaceChildren(
     ...(me ? [kv('Nome', me.name), kv('Código', me.code), kv('Permissão', me.admin ? 'administrador' : 'comum')] : []),
+    ...(me && state.config.gate?.enabled ? [kv('Portão', me.gate ? 'pode abrir' : 'sem permissão')] : []),
     kv('Vídeo H.265 ao vivo', hevcSupport() ? 'suportado' : 'não suportado (peça H.264 no fluxo secundário do DVR)'),
     kv('Usuário Tailscale', state.config.user ?? '—'));
   $('#device-rename').hidden = !me;
@@ -511,7 +661,9 @@ async function renderSettings() {
       kv('Ao vivo (go2rtc)', s.live ? 'ok' : 'parado'),
       kv('Alertas do DVR', s.alerts ? 'conectado' : (s.alerts_error ?? 'desconectado')),
       kv('Último alerta', s.last_event_at ? new Date(s.last_event_at * 1000).toLocaleString('pt-BR') : '—'),
+      kv('Portão', s.gate ? 'configurado' : (s.gate_error ?? 'não configurado')),
       kv('Versão', state.config.version));
+    $('#gate-test').hidden = !(s.gate && me?.admin);
   } catch (err) {
     $('#server-info').replaceChildren(kv('Servidor', `erro: ${err.message}`));
   }
@@ -568,6 +720,25 @@ async function init() {
   $('#single-back').onclick = () => { history.length > 1 ? history.back() : (location.hash = '#ao-vivo'); };
   $('#rec-form').addEventListener('submit', (e) => { e.preventDefault(); searchRecordings(); });
   $('#alert-more').onclick = () => loadAlerts(true);
+  setupGate();
+  $('#gate-btn').onclick = openGateSheet;
+  $('#gate-close').onclick = closeGateSheet;
+  $('#gate').addEventListener('click', (e) => { if (e.target.id === 'gate') closeGateSheet(); });
+  bindHold($('#gate-hold'), doOpenGate);
+  $('#lightbox').onclick = () => { $('#lightbox').hidden = true; };
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('#lightbox').hidden) $('#lightbox').hidden = true;
+    else if (!$('#gate').hidden) closeGateSheet();
+  });
+  $('#gate-test').onclick = async () => {
+    try {
+      const r = await api('/api/gate/check', { method: 'POST', body: {} });
+      toast(r.button_ok ? `Placa ${r.name} respondeu. Tudo certo.` : `Placa ${r.name} respondeu, mas sem o botão esperado (achei: ${r.buttons.join(', ') || 'nenhum'}).`, 6000);
+    } catch (err) {
+      toast(`Placa do portão: ${err.message}`, 6000);
+    }
+  };
   $('#push-on').onclick = enablePush;
   $('#push-off').onclick = disablePush;
   $('#push-test').onclick = async () => {

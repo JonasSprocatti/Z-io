@@ -7,3 +7,5 @@ build/
 *.env
 !deploy/zoio.env.example
 uv.lock
+secrets.yaml
+.esphome/
