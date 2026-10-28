@@ -78,7 +78,7 @@ class AlarmListener:
         kind = str(info.get("Event", "?"))
         status = str(info.get("Status", "?"))
         cam = self.cfg.camera(camera)
-        if cam is None:
+        if cam is None or cam.hidden:  # canal escondido no app (sem câmera): nada de alerta
             return
         # O DVR repete "Start" enquanto há movimento; só registramos a transição.
         key = (camera, kind)

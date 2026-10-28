@@ -221,6 +221,17 @@ class Store:
         self.db.execute("DELETE FROM sessions WHERE expires_at < ?", (time.time(),))
         self.db.commit()
 
+    # ---- câmeras (nome e "ocultar" escolhidos no app) ----
+
+    def camera_settings(self) -> dict[int, dict]:
+        raw = json.loads(self.get("cameras") or "{}")
+        return {int(k): v for k, v in raw.items()}
+
+    def set_camera_settings(self, number: int, name: str | None, hidden: bool) -> None:
+        settings = self.camera_settings()
+        settings[number] = {"name": name, "hidden": hidden}
+        self.set("cameras", json.dumps({str(k): v for k, v in settings.items()}, ensure_ascii=False))
+
     # ---- chave/valor ----
 
     def get(self, key: str) -> str | None:

@@ -23,7 +23,7 @@ from .devices import public as public_device
 from .esphome import EspHomeError
 from .porteiro import FAILED, GATE_ID, GateBusy, GateError, Porteiro
 from .push import Notifier
-from .store import Store
+from .store import PORTARIA_KINDS, Store
 
 log = logging.getLogger(__name__)
 
@@ -184,6 +184,21 @@ async def manifest(request: web.Request) -> web.FileResponse:
 
 # ---------------------------------------------------------------- API
 
+CAMERA_NAME_MAX = 40
+
+
+def public_camera(c) -> dict:
+    return {"number": c.number, "name": c.name, "default_name": c.default_name, "hidden": c.hidden, "main": c.main, "sub": c.sub}
+
+
+def apply_camera_settings(cfg: Config, store: Store) -> None:
+    """Nome e "ocultar" escolhidos no app valem por cima do zoio.env."""
+    settings = store.camera_settings()
+    for c in cfg.cameras:
+        s = settings.get(c.number) or {}
+        c.name = s.get("name") or c.default_name
+        c.hidden = bool(s.get("hidden"))
+
 
 async def api_config(request: web.Request) -> web.Response:
     cfg = request.app[CFG]
@@ -192,7 +207,7 @@ async def api_config(request: web.Request) -> web.Response:
         {
             "version": __version__,
             "user": current_user(request),
-            "cameras": [{"number": c.number, "name": c.name, "main": c.main, "sub": c.sub} for c in cfg.cameras],
+            "cameras": [public_camera(c) for c in cfg.cameras],
             "push_key": notifier.vapid.public_key if notifier else None,
             "device_approval": cfg.device_approval,
             "device": public_device(current_device(request), current_device(request)["id"]) if current_device(request) else None,
@@ -243,6 +258,8 @@ async def api_events(request: web.Request) -> web.Response:
         status=None if request.query.get("all") else "Start",
     )
     names = {c.number: c.name for c in cfg.cameras}
+    hidden = {c.number for c in cfg.cameras if c.hidden}
+    rows = [r for r in rows if r["camera"] not in hidden or r["kind"] in PORTARIA_KINDS]
     for r in rows:
         r["name"] = names.get(r["camera"], f"Câmera {r['camera']}")
     return web.json_response(rows)
@@ -275,6 +292,25 @@ def _camera_or_404(request: web.Request, number: int | None):
     if cam is None:
         raise web.HTTPNotFound(text="câmera não encontrada")
     return cam
+
+
+async def api_camera_update(request: web.Request) -> web.Response:
+    """Só o administrador troca o nome ou esconde uma câmera; vale para todos os aparelhos."""
+    require_admin(request)
+    cam = _camera_or_404(request, int(request.match_info["number"]))
+    body = await json_body(request)
+    name = body.get("name", cam.name if cam.name != cam.default_name else "")
+    hidden = body.get("hidden", cam.hidden)
+    if not isinstance(name, str) or not isinstance(hidden, bool):
+        raise web.HTTPBadRequest(text="nome ou ocultar inválido")
+    name = " ".join(name.split())
+    if len(name) > CAMERA_NAME_MAX:
+        raise web.HTTPBadRequest(text=f"nome com mais de {CAMERA_NAME_MAX} letras")
+    store = request.app[STORE]
+    store.set_camera_settings(cam.number, name if name and name != cam.default_name else None, hidden)
+    apply_camera_settings(request.app[CFG], store)
+    request.app[BUS].publish({"type": "cameras"})
+    return web.json_response(public_camera(cam))
 
 
 async def api_recordings(request: web.Request) -> web.Response:
@@ -782,6 +818,7 @@ def create_app(cfg: Config, enable_push: bool = True) -> web.Application:
     app = web.Application(middlewares=[security], client_max_size=64 * 1024)
     app[CFG] = cfg
     app[STORE] = store = Store(cfg.data_dir / "zoio.db")
+    apply_camera_settings(cfg, store)
     app[BUS] = bus = EventBus()
     app[CLIPS] = Clips(cfg)
     app[DEVICES] = Devices(store, cfg.session_days)
@@ -802,6 +839,7 @@ def create_app(cfg: Config, enable_push: bool = True) -> web.Application:
     r.add_get("/api/status", api_status)
     r.add_get("/api/events", api_events)
     r.add_get("/api/events/stream", api_event_stream)
+    r.add_post("/api/cameras/{number:\\d+}", api_camera_update)
     r.add_get("/api/recordings", api_recordings)
     r.add_post("/api/clips", api_clip_create)
     r.add_get("/api/clips/{id}", api_clip_get)

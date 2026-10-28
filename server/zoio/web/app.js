@@ -3,7 +3,7 @@
 import * as device from '/web/device.js';
 
 const $ = (sel) => document.querySelector(sel);
-const state = { config: null, me: null, cameras: [], liveEls: new Map(), alertsUnread: 0, oldestAlert: null, pendingDevices: 0 };
+const state = { config: null, me: null, cameras: [], allCameras: [], liveEls: new Map(), alertsUnread: 0, oldestAlert: null, pendingDevices: 0 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const store = {
@@ -123,7 +123,7 @@ const pad = (n) => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const hhmm = (dvrTime) => dvrTime.slice(11, 16);
 const mb = (bytes) => bytes ? `${(bytes / 1048576).toFixed(bytes > 1e8 ? 0 : 1)} MB` : '';
-const camName = (n) => state.cameras.find((c) => c.number === n)?.name ?? `Câmera ${n}`;
+const camName = (n) => state.allCameras.find((c) => c.number === n)?.name ?? `Câmera ${n}`;
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -170,7 +170,27 @@ function makeStream(src, { controls }) {
   return v;
 }
 
+// `allCameras` tem também as ocultas (só aparecem em Ajustes › Câmeras).
+function setCameras(list) {
+  state.allCameras = list;
+  state.cameras = list.filter((c) => !c.hidden);
+}
+
+// Nome ou visibilidade mudou (aqui ou em outro aparelho): refaz o que mostra câmeras.
+async function reloadCameras() {
+  const cfg = await api('/api/config');
+  state.config.cameras = cfg.cameras;
+  setCameras(cfg.cameras);
+  $('#grid').replaceChildren();
+  state.liveEls.clear();
+  if (currentView === 'live') renderGrid();
+  if (currentView === 'single') route();
+  if (currentView === 'settings') { renderCameraSettings(); renderPush(); }
+  if ($('#rec-camera').childElementCount) fillCameraSelect($('#rec-camera'), Number($('#rec-camera').value));
+}
+
 async function renderGrid() {
+  $('#grid-empty').hidden = state.cameras.length > 0;
   await loadPlayer();
   const grid = $('#grid');
   if (grid.childElementCount) return;
@@ -278,7 +298,8 @@ async function openClip(item) {
 }
 
 function renderRecordings(params) {
-  const cam = Number(params.get('cam')) || Number($('#rec-camera').value) || state.cameras[0]?.number;
+  const visible = (n) => state.cameras.some((c) => c.number === n);
+  const cam = [Number(params.get('cam')), Number($('#rec-camera').value)].find(visible) ?? state.cameras[0]?.number;
   fillCameraSelect($('#rec-camera'), cam);
   if (params.get('date')) $('#rec-date').value = params.get('date');
   if (!$('#rec-date').value) $('#rec-date').value = today();
@@ -361,6 +382,7 @@ function listenEvents() {
       return;
     }
     if (ev.type === 'portaria') { portariaUpdate(ev); return; }
+    if (ev.type === 'cameras') { reloadCameras().catch(() => {}); return; }
     if (ev.type === 'porta' || ev.type === 'campainha') {
       const list = $('#alert-list');
       list.querySelector('.empty')?.remove();
@@ -948,7 +970,45 @@ async function refreshDevices() {
   $('#device-list').replaceChildren(approveForm(), ...items.map(deviceItem));
 }
 
+function cameraItem(c) {
+  const input = el('input', { type: 'text', maxlength: 40, value: c.name, placeholder: c.default_name, autocomplete: 'off', 'aria-label': `Nome da câmera ${c.number}` });
+  const save = el('button', { class: 'ghost small cam-save', type: 'submit', hidden: true }, 'Salvar');
+  const update = async (body, done) => {
+    try {
+      await api(`/api/cameras/${c.number}`, { method: 'POST', body });
+      toast(done);
+      await reloadCameras();
+    } catch (err) {
+      toast(err.message);
+    }
+  };
+  // Enquanto edita o nome, o Salvar toma o lugar do Ocultar (no celular não cabem os dois).
+  input.addEventListener('input', () => {
+    save.hidden = input.value.trim() === c.name;
+    input.closest('li').classList.toggle('editing', !save.hidden);
+  });
+  const rename = (e) => {
+    e.preventDefault();
+    const name = input.value.trim();
+    if (name === c.name) return;
+    update({ name }, name ? 'Nome salvo.' : `Voltou ao nome original: ${c.default_name}.`);
+  };
+  const toggle = el('button', { class: 'ghost small', type: 'button', 'aria-pressed': c.hidden, onclick: () => update({ hidden: !c.hidden }, c.hidden ? `${c.name} voltou a aparecer.` : `${c.name} ficou oculta.`) },
+    icon(c.hidden ? 'eye' : 'eye-off'), c.hidden ? 'Mostrar' : 'Ocultar');
+  return el('li', { class: `cam-item${c.hidden ? ' off' : ''}` },
+    evIcon(c.hidden ? 'eye-off' : 'live', c.hidden ? 'muted' : 'info'),
+    el('form', { class: 'main row', onsubmit: rename }, el('span', { class: 'cam-num' }, c.number), input, save),
+    toggle);
+}
+
+function renderCameraSettings() {
+  const admin = !!state.me?.device?.admin;
+  $('#cameras-card').hidden = !admin;
+  if (admin) $('#camera-list').replaceChildren(...state.allCameras.map(cameraItem));
+}
+
 async function renderSettings() {
+  renderCameraSettings();
   renderPush();
   const me = state.me?.device;
   $('#device-info').replaceChildren(
@@ -1036,7 +1096,7 @@ async function init() {
     document.body.innerHTML = `<p style="padding:24px">Não consegui falar com o Zóio: ${err.message}</p>`;
     return;
   }
-  state.cameras = state.config.cameras;
+  setCameras(state.config.cameras);
   hideSplash();
   setCols(store.get('cols', window.innerWidth >= 900 ? 4 : 2));
   $('#layout-picker').addEventListener('click', (e) => { if (e.target.dataset.cols) setCols(Number(e.target.dataset.cols)); });

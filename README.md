@@ -71,6 +71,10 @@ Detalhes que importam:
 
 Para atualizar: `git pull && sudo ./deploy/install.sh`.
 
+## Nomes e câmeras ocultas
+
+Num aparelho administrador, **Ajustes › Câmeras** troca o nome de cada câmera e esconde os canais que não têm câmera ligada. Vale para todos os aparelhos na hora. A câmera oculta some do ao vivo, das gravações e dos alertas, e não manda notificação; o botão **Mostrar** traz de volta. Apagar o nome volta ao de `ZOIO_CHANNEL_NAMES` no `zoio.env`.
+
 ## Portaria
 
 Com uma placa ESP32 no portão (ESPHome), o Zóio vira o porteiro da casa. Quem tem a permissão de portaria recebe uma notificação quando tocam a campainha, que abre a câmera do portão ao vivo. No botão **Portaria** do app, vê a câmera, abre o portão e abre ou fecha as garagens, que mostram se estão abertas ou fechadas. Os comandos precisam ser segurados até completar o círculo, fechar uma garagem exige ver ela ao vivo, e tudo fica em Alertas com quem fez e uma foto. Também dá para conversar com quem está no portão, no estilo rádio: segure para falar e solte para ouvir, uma pessoa por vez.
