@@ -129,6 +129,8 @@ async def security(request: web.Request, handler):
                 content_type="application/json",
             )
     resp = await handler(request)
+    if request.path.startswith("/web/"):
+        resp.headers.setdefault("Cache-Control", "no-cache")  # confere com o Pi antes de usar a cópia guardada
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     resp.headers.setdefault("X-Frame-Options", "DENY")
@@ -163,8 +165,13 @@ async def json_body(request: web.Request) -> dict:
 # ---------------------------------------------------------------- páginas
 
 
-async def index(request: web.Request) -> web.FileResponse:
-    return web.FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+async def index(request: web.Request) -> web.Response:
+    # A versão no endereço do CSS e do JS faz o navegador largar a cópia antiga
+    # depois de uma atualização (sem isso a página nova vinha com o estilo velho).
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    for asset in ("/web/app.css", "/web/app.js"):
+        html = html.replace(f'"{asset}"', f'"{asset}?v={__version__}"')
+    return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
 
 
 async def service_worker(request: web.Request) -> web.FileResponse:

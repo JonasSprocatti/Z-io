@@ -2,6 +2,7 @@ import pytest
 from aiohttp import web
 
 from zoio.app import create_app
+from zoio import __version__
 
 
 @pytest.fixture
@@ -51,7 +52,12 @@ async def test_config_and_static(client):
     assert data["user"] == "jonas@github"
     assert [c["sub"] for c in data["cameras"]] == ["cam1_sub", "cam2_sub", "cam3_sub", "cam4_sub"]
     assert data["push_key"]
-    assert (await client.get("/", headers=H)).status == 200
+    page = await client.get("/", headers=H)
+    assert page.status == 200
+    html = await page.text()
+    assert f'/web/app.css?v={__version__}' in html and f'/web/app.js?v={__version__}' in html
+    css = await client.get(f"/web/app.css?v={__version__}", headers=H)
+    assert css.status == 200 and css.headers["Cache-Control"] == "no-cache"
     assert (await client.get("/sw.js", headers=H)).status == 200
     status = await (await client.get("/api/status", headers=H)).json()
     assert status["live"] is True
