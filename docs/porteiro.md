@@ -53,43 +53,87 @@ Revogar um aparelho tira a permissão junto.
 
 ## Peças
 
-Lista completa e preços em `fase-2/lista-compras-portao.md` (arquivos do projeto). Para esta parte: ESP32-S3 DevKitC-1 (N16R8), módulo relé de 4 canais com optoacoplador que aciona com 3,3 V, um sensor magnético com fio por garagem, o botão da campainha, regulador 12 V → 5 V, fonte 12 V com bateria e caixa hermética. O microfone, o amplificador e o alto-falante entram na parte 2.
+Lista completa e preços em `fase-2/lista-compras-portao.md` (arquivos do projeto): ESP32-S3 DevKitC-1 (N16R8), módulo relé de 4 canais com optoacoplador, o botão da campainha, regulador 12 V → 5 V, fonte 12 V com bateria e caixa hermética, mais o que a opção das garagens pedir (abaixo). O microfone, o amplificador e o alto-falante entram na parte 2, mas os pinos já estão reservados.
+
+Para montar sem solda: ESP32-S3 e módulos com os pinos já soldados, uma placa de expansão com bornes para o ESP32-S3 de 44 pinos, jumpers fêmea-fêmea e conectores de alavanca para dividir 5 V e GND.
+
+## Garagens: três jeitos de acionar, dois de saber o estado
+
+Para o Zóio é tudo igual: um botão `garagem_N` por garagem e, se houver, um sensor `garagem_N_aberta`. A escolha fica no fim do `porteiro.yaml`, em `packages:`.
+
+| Acionamento | Pacote | Quando usar |
+|---|---|---|
+| Fio até a central | `porteiro/garagens-rele.yaml` (padrão) | Qualquer central. Relés 2 e 3 na entrada de botoeira (BOT e GND/COM), com um par de fios até cada central. |
+| Controle extra | `porteiro/garagens-rele.yaml` | Central com controle rolling code e sem fio até ela. Um controle original fica na caixa, cadastrado na central, e os relés 2 e 3 apertam os botões dele (precisa soldar dois fios em cada botão). |
+| Rádio, código fixo | `porteiro/garagens-radio.yaml` | Controle de código fixo (HT6P20, EV1527). A placa transmite o mesmo código, sem fio até a central. Quem estiver perto com o equipamento certo consegue copiar um código fixo, como já acontece com o controle de vocês. |
+
+| Estado | Pacote | Como |
+|---|---|---|
+| Sensor com fio | `porteiro/sensores-fio.yaml` (padrão) | Sensor magnético de alarme, um par de fios até a placa. |
+| Sensor sem fio | `porteiro/sensores-radio.yaml` | Sensor de abertura 433 MHz a pilha que mande um código ao abrir e outro ao fechar. Depois que a placa reinicia, o estado volta na próxima vez que a garagem abrir ou fechar. |
+
+Sem sensor, a garagem aparece no app só com **Acionar**.
 
 ## Ligação
 
-*A confirmar com as fotos das centrais dos motores e da fechadura.*
+Esquema passo a passo, com as opções: [Montagem do Porteiro](https://claude.ai/artifact/FWdz2iXjixk4tvX1NonjBW). *Fechadura e centrais a confirmar com as fotos.*
+
+Tudo vai na fileira esquerda do ESP32-S3 DevKitC-1 (olhando por cima, com o USB para baixo). Vale o nome impresso ao lado do pino.
 
 | ESP32-S3 | Vai em |
 |---|---|
-| 5V | VCC do módulo relé e saída de 5 V do regulador |
-| GND | GND do módulo relé, do regulador, dos sensores e da campainha |
-| GPIO10 | IN1 do relé: fechadura do portão |
-| GPIO11 | IN2 do relé: botoeira da central da garagem 1 |
-| GPIO12 | IN3 do relé: botoeira da central da garagem 2 |
-| GPIO13 | sensor magnético da garagem 1 (o outro fio no GND) |
-| GPIO14 | sensor magnético da garagem 2 (o outro fio no GND) |
+| 3V3 | microfone (VDD) e receptor de rádio (VCC) |
+| GPIO4, GPIO5, GPIO6 | microfone INMP441: SCK, WS, SD (L/R no GND). Parte 2 |
+| GPIO7, GPIO15, GPIO16 | amplificador MAX98357A: BCLK, LRC, DIN (VIN no 5V). Parte 2 |
 | GPIO17 | botão da campainha (o outro fio no GND) |
+| GPIO8 | DATA do receptor 433 MHz RXB6 (VCC no 3V3), se usar rádio |
+| GPIO9 | DATA do transmissor 433 MHz STX882 (VCC no 5V), na opção rádio |
+| GPIO10 | IN1 do relé: fechadura do portão |
+| GPIO11, GPIO12 | IN2 e IN3 do relé: garagens 1 e 2 (fio até a central ou controle extra) |
+| GPIO13, GPIO14 | sensores magnéticos com fio das garagens 1 e 2 (o outro fio no GND) |
+| 5V | saída de 5 V do regulador; também VCC do relé, VIN do amplificador e VCC do transmissor |
+| GND | tudo que é GND, junto com o negativo da fonte |
 
-- **Garagens:** os bornes **COM** e **NA** (normalmente aberto) de cada relé vão em paralelo com a entrada de **botoeira** da central do motor. O pulso faz o mesmo que o botão de parede ou o controle: abre, para ou fecha. O rádio e os controles continuam funcionando.
-- **Fechadura:** COM e NA do relé 1 em paralelo com o botão de abrir do porteiro, nunca na linha de 2 fios do interfone. Se for uma fechadura de 12 V ligada direto na fonte, o relé fecha o circuito da fonte para a fechadura.
-- **Sensores:** com a garagem fechada, o ímã fica encostado e o contato fecha. Se o seu sensor fizer o contrário, mude `sensor_invertido` para `"true"`.
-- **Relés:** a maioria dos módulos aciona com nível baixo (`rele_invertido: "true"`). Se o seu acionar com nível alto, mude para `"false"`.
+- **Relés:** VCC no 5V. Se o módulo tiver jumper de nível (H/L), deixe em L. Se tiver o jumper JD-VCC, tire o jumper, ligue JD-VCC no 5V e VCC no 3V3. A maioria aciona com nível baixo (`rele_invertido: "true"`); se o seu acionar com nível alto, mude para `"false"`.
+- **Fechadura:** COM e NA do relé 1 junto com o botão de abrir do porteiro, nunca na linha de 2 fios do interfone. Se a fechadura for ligada direto na fonte de 12 V: 12 V + no COM, NA no + da fechadura e um diodo 1N4007 nos terminais dela (faixa no +). Eletroímã usa o NF e um pulso mais longo.
+- **Sensores com fio:** com a garagem fechada, o ímã fica encostado e o contato fecha. Se o seu sensor fizer o contrário, mude `sensor_invertido` para `"true"`.
+- **Antenas de 433 MHz:** um fio rígido de 17,3 cm em cada módulo de rádio.
 
-Os tempos (`pulso_portao` e `pulso_garagem`) e essas duas opções ficam no topo de [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml). Os nomes dos botões e sensores não podem mudar, porque são eles que o Zóio procura: `abrir_portao`, `garagem_1`, `garagem_2`, `garagem_1_aberta`, `garagem_2_aberta`, `campainha` e `sinal_wifi`. Uma garagem sem o sensor ligado aparece só com **Acionar**.
+Os tempos (`pulso_portao` e `pulso_garagem`) e essas opções ficam no topo de [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml). Os nomes dos botões e sensores não podem mudar, porque são eles que o Zóio procura: `abrir_portao`, `garagem_1`, `garagem_2`, `garagem_1_aberta`, `garagem_2_aberta`, `campainha` e `sinal_wifi`.
 
 ## Programação da placa
 
-O firmware é o [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml) (ESPHome 2026.10). O GitHub compila ele a cada mudança, com segredos de mentira (`.github/workflows/firmware.yml`). A senha do Wi-Fi e a chave ficam num `secrets.yaml` que só existe no Pi:
+O firmware é o [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml) (ESPHome 2026.10), com os pacotes de `deploy/esphome/porteiro/`. O GitHub compila as duas variantes (com fio e com rádio) a cada mudança, com segredos de mentira (`.github/workflows/firmware.yml`). A senha do Wi-Fi, a chave e os códigos de rádio ficam num `secrets.yaml` que só existe no Pi:
 
 ```yaml
 wifi_ssid: "nome-da-rede"
 wifi_password: "..."
 api_key: "<saída do zoio portao chave>"
+# só na opção rádio (saída do zoio portao radio):
+radio_protocolo: "6"
+radio_garagem_1: "0110..."
+radio_garagem_2: "0110..."
+# só com sensores sem fio:
+sensor_protocolo: "1"
+sensor_garagem_1_abriu: "1010..."
+sensor_garagem_1_fechou: "1010..."
+sensor_garagem_2_abriu: "1010..."
+sensor_garagem_2_fechou: "1010..."
 ```
 
 Plano para gravar (a validar quando a placa chegar): compilar e gravar no próprio Pi, com a placa no USB, para os segredos não saírem de casa. O ESPHome atual pede Python 3.12, então ele vai num ambiente separado do Zóio. A primeira compilação no Pi 3B é lenta, mas só acontece uma vez.
 
 Depois de gravada, reserve um IP fixo para a placa no roteador (o nome dela na rede é `zoio-porteiro`).
+
+### Aprender os códigos do rádio
+
+Com o receptor ligado, a placa escreve no log cada código de 433 MHz que escuta. O Zóio mostra esses códigos, sem cabo:
+
+```bash
+sudo zoio portao radio              # escuta por 60 s (--segundos para mudar)
+```
+
+Aperte cada botão do controle perto da placa, um de cada vez, e abra e feche cada garagem que tiver sensor sem fio. Cada código novo aparece uma vez, com o protocolo. Anote de onde veio cada um, ponha no `secrets.yaml` e grave a placa de novo. Na primeira gravação, sem os códigos ainda, use a variante com fio; o receptor já funciona nela.
 
 ## Configuração no Zóio
 
@@ -100,6 +144,7 @@ sudo systemctl restart zoio
 sudo zoio portao testar               # conecta na placa e lista portas, sensores e campainha, sem acionar nada
 sudo zoio portao abrir                # abre o portão de verdade (fica registrado como "Pi")
 sudo zoio portao acionar garagem_1    # um pulso na botoeira da garagem 1 (abre, para ou fecha)
+sudo zoio portao radio                # mostra os códigos de rádio que a placa escuta (para aprender o controle)
 ```
 
 | Variável | Para quê |

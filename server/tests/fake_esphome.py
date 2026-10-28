@@ -33,6 +33,8 @@ class FakeEspHome:
         self.connections = 0
         self.silent = False  # para de responder (simula a placa travada)
         self.wifi_dbm = -61.0
+        self.logs: list[str] = []  # linhas mandadas a quem assinar o log (ex.: códigos de rádio)
+        self.log_level: int | None = None
         self._subscribers: list = []
         self._writers: set[asyncio.StreamWriter] = set()
         self.server: asyncio.Server | None = None
@@ -126,6 +128,10 @@ class FakeEspHome:
                     send_msg(eh.SENSOR_STATE, eh.pb_fixed32(1, 7) + eh.pb_float(2, self.wifi_dbm))
                     subscriber = send_state
                     self._subscribers.append(subscriber)
+                elif msg_type == eh.SUBSCRIBE_LOGS:
+                    self.log_level = eh.pb_parse(data).get(1)
+                    for line in self.logs:
+                        send_msg(eh.SUBSCRIBE_LOGS_RESPONSE, eh.pb_uint(1, 3) + eh.pb_string(3, line))
                 elif msg_type == eh.BUTTON_COMMAND:
                     self.pressed.append(eh.pb_parse(data)[1])
                 elif msg_type == eh.PING_REQUEST:

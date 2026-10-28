@@ -1,16 +1,15 @@
 # Placa do porteiro do Zóio: ESP32-S3 no portão.
 #
 # Faz tudo o que fica no portão: campainha, fechadura do portão de pedestre e
-# a botoeira dos motores das duas garagens, com o sensor magnético de cada uma.
-# A conversa (microfone e alto-falante) entra na parte 2.
+# as duas garagens, com o estado aberta/fechada de cada uma. A conversa
+# (microfone e alto-falante) entra na parte 2.
 #
-# Ligação (ESP32-S3-DevKitC-1):
+# Ligação (ESP32-S3-DevKitC-1, tudo na fileira esquerda; esquema completo em
+# docs/porteiro.md):
 #   GPIO10 → IN1 do módulo relé: fechadura do portão
-#   GPIO11 → IN2: botoeira da central da garagem 1
-#   GPIO12 → IN3: botoeira da central da garagem 2
-#   GPIO13 ← sensor magnético da garagem 1 (o outro fio no GND)
-#   GPIO14 ← sensor magnético da garagem 2 (o outro fio no GND)
 #   GPIO17 ← botão da campainha (o outro fio no GND)
+#   GPIO8  ← DATA do receptor de rádio 433 MHz (RXB6, no 3V3), se houver
+#   Garagens: veja o pacote escolhido em `packages:` no fim deste arquivo.
 #
 # Os nomes dos botões e sensores são os que o Zóio procura: não mude.
 # Os nomes que aparecem no app ficam no zoio.env (ZOIO_GARAGE_NAMES).
@@ -22,23 +21,18 @@
 #   Para atualizar, ela volta para o USB do Pi;
 # - o tempo de cada pulso está gravado aqui: nenhum comando segura um relé ligado.
 #
-# Os segredos (Wi-Fi e chave) ficam num secrets.yaml gerado no Pi, fora do Git.
+# Os segredos (Wi-Fi, chave e códigos de rádio) ficam num secrets.yaml gerado
+# no Pi, fora do Git.
 
 substitutions:
   rele_invertido: "true"  # a maioria dos módulos aciona com nível baixo
   pulso_portao: 1s        # quanto tempo a fechadura recebe energia
-  pulso_garagem: 700ms    # quanto tempo a botoeira do motor fica fechada
-  sensor_invertido: "false"  # "true" se o sensor fechar o contato com a garagem aberta
+  pulso_garagem: 700ms    # quanto tempo a botoeira (ou o botão do controle extra) fica apertada
+  sensor_invertido: "false"  # "true" se o sensor com fio fechar o contato com a garagem aberta
 
 esphome:
   name: zoio-porteiro
   friendly_name: Porteiro
-  on_boot:
-    priority: 800
-    then:
-      - output.turn_off: rele_portao
-      - output.turn_off: rele_garagem_1
-      - output.turn_off: rele_garagem_2
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -63,12 +57,6 @@ output:
   - platform: gpio
     id: rele_portao
     pin: { number: GPIO10, inverted: "${rele_invertido}" }
-  - platform: gpio
-    id: rele_garagem_1
-    pin: { number: GPIO11, inverted: "${rele_invertido}" }
-  - platform: gpio
-    id: rele_garagem_2
-    pin: { number: GPIO12, inverted: "${rele_invertido}" }
 
 script:
   - id: pulso_portao
@@ -77,18 +65,6 @@ script:
       - output.turn_on: rele_portao
       - delay: ${pulso_portao}
       - output.turn_off: rele_portao
-  - id: pulso_garagem_1
-    mode: single
-    then:
-      - output.turn_on: rele_garagem_1
-      - delay: ${pulso_garagem}
-      - output.turn_off: rele_garagem_1
-  - id: pulso_garagem_2
-    mode: single
-    then:
-      - output.turn_on: rele_garagem_2
-      - delay: ${pulso_garagem}
-      - output.turn_off: rele_garagem_2
 
 button:
   - platform: template
@@ -96,16 +72,6 @@ button:
     icon: mdi:gate-open
     on_press:
       - script.execute: pulso_portao
-  - platform: template
-    name: "Garagem 1"  # vira garagem_1
-    icon: mdi:garage
-    on_press:
-      - script.execute: pulso_garagem_1
-  - platform: template
-    name: "Garagem 2"
-    icon: mdi:garage
-    on_press:
-      - script.execute: pulso_garagem_2
 
 binary_sensor:
   - platform: gpio
@@ -114,20 +80,32 @@ binary_sensor:
     filters:
       - delayed_on: 30ms   # ignora ruído no fio
       - delayed_off: 2s    # segura o "tocou" o bastante para chegar no Zóio
-  - platform: gpio
-    name: "Garagem 1 aberta"
-    device_class: garage_door
-    pin: { number: GPIO13, mode: { input: true, pullup: true }, inverted: "${sensor_invertido}" }
-    filters:
-      - delayed_on_off: 300ms
-  - platform: gpio
-    name: "Garagem 2 aberta"
-    device_class: garage_door
-    pin: { number: GPIO14, mode: { input: true, pullup: true }, inverted: "${sensor_invertido}" }
-    filters:
-      - delayed_on_off: 300ms
 
 sensor:
   - platform: wifi_signal
     name: "Sinal Wi-Fi"  # o Zóio mostra em Ajustes: ajuda a saber se precisa de repetidor
     update_interval: 60s
+
+# Receptor de rádio 433 MHz (opcional). Escuta o controle das garagens, para
+# aprender o código (`zoio portao radio` mostra o que chegar), e os sensores
+# sem fio. Sem o receptor ligado, não atrapalha.
+remote_receiver:
+  id: radio_rx
+  pin: { number: GPIO8, mode: { input: true, pulldown: true } }
+  dump: rc_switch
+  tolerance: 35%
+  filter: 250us
+  idle: 4ms
+
+# Garagens: escolha uma linha de cada grupo.
+packages:
+  # Como a placa aciona as garagens:
+  #   porteiro/garagens-rele.yaml  → relés 2 e 3, na botoeira da central ou
+  #                                  nos botões de um controle extra (rolling code)
+  #   porteiro/garagens-radio.yaml → transmissor 433 MHz com o código do controle
+  #                                  (só controle de código fixo)
+  garagens: !include porteiro/garagens-rele.yaml
+  # Como o Zóio sabe se a garagem está aberta:
+  #   porteiro/sensores-fio.yaml   → sensor magnético com fio
+  #   porteiro/sensores-radio.yaml → sensor de abertura sem fio, 433 MHz
+  sensores: !include porteiro/sensores-fio.yaml

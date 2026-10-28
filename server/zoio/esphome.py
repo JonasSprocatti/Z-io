@@ -16,6 +16,8 @@ Fluxo:
    depois, cada mudança (campainha, sensores das garagens).
 5. ButtonCommandRequest(key), seguido de um Ping para confirmar que a placa
    processou o comando (a resposta ao ping só chega depois dele).
+6. SubscribeLogsRequest, só para aprender códigos de rádio: o receptor da
+   placa escreve no log cada código que escuta.
 
 Quadros: 0x01, tamanho (u16 big-endian) e o conteúdo. Depois do handshake,
 o conteúdo cifrado traz tipo (u16), tamanho (u16) e a mensagem protobuf.
@@ -58,8 +60,12 @@ LIST_ENTITIES_DONE = 19
 SUBSCRIBE_STATES = 20
 BINARY_SENSOR_STATE = 21
 SENSOR_STATE = 25
+SUBSCRIBE_LOGS = 28
+SUBSCRIBE_LOGS_RESPONSE = 29
 LIST_ENTITIES_BUTTON = 61
 BUTTON_COMMAND = 62
+
+LOG_LEVEL_INFO = 3
 
 KEEPALIVE = 20  # segundos sem ouvir a placa até mandar um ping
 DEAD_AFTER = 50  # segundos sem resposta nenhuma: conexão perdida
@@ -260,6 +266,7 @@ class EspHome:
         self.server_info: str | None = None
         self.on_state: Callable[[int, bool], None] | None = None  # sensores binários
         self.on_value: Callable[[int, float], None] | None = None  # sensores numéricos
+        self.on_log: Callable[[str], None] | None = None  # linhas do log, depois de subscribe_logs()
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._send: _Cipher | None = None
@@ -337,6 +344,8 @@ class EspHome:
             if not fields.get(3):
                 value = struct.unpack("<f", struct.pack("<I", int(fields.get(2, 0))))[0]
                 self.on_value(int(fields.get(1, 0)), value)
+        elif msg_type == SUBSCRIBE_LOGS_RESPONSE and self.on_log:
+            self.on_log(_text(pb_parse(data).get(3)))
         # outras mensagens (logs, outros sensores) não interessam
 
     async def _wait_for(self, *types: int) -> tuple[int, bytes]:
@@ -399,6 +408,10 @@ class EspHome:
 
     async def subscribe_states(self) -> None:
         self._send_message(SUBSCRIBE_STATES)
+        await self._writer.drain()
+
+    async def subscribe_logs(self, level: int = LOG_LEVEL_INFO) -> None:
+        self._send_message(SUBSCRIBE_LOGS, pb_uint(1, level))
         await self._writer.drain()
 
     async def ping(self) -> None:

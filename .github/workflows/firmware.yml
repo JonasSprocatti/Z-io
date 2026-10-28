@@ -1,7 +1,7 @@
 name: firmware
 
 # Compila o firmware das placas ESPHome com segredos de mentira. Os de verdade
-# (Wi-Fi e chave da API) só existem no Pi.
+# (Wi-Fi, chave da API e códigos de rádio) só existem no Pi.
 on:
   push:
     branches: [main]
@@ -12,6 +12,11 @@ on:
 jobs:
   compilar:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # fio: relés e sensores com fio (o padrão); radio: transmissor e sensores de 433 MHz
+        variante: [fio, radio]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,12 +27,30 @@ jobs:
           path: |
             ~/.platformio
             deploy/esphome/.esphome
-          key: esphome-2026.10.1-${{ hashFiles('deploy/esphome/*.yaml') }}
-          restore-keys: esphome-2026.10.1-
+          key: esphome-2026.10.1-${{ matrix.variante }}-${{ hashFiles('deploy/esphome/**/*.yaml') }}
+          restore-keys: esphome-2026.10.1-${{ matrix.variante }}-
       - run: pip install esphome==2026.10.1
       - name: Segredos de mentira
         working-directory: deploy/esphome
         run: |
           printf 'wifi_ssid: "teste"\nwifi_password: "senha-de-teste"\napi_key: "%s"\n' "$(openssl rand -base64 32)" > secrets.yaml
+          cat >> secrets.yaml <<'EOF'
+          radio_protocolo: "6"
+          radio_garagem_1: "0110100101101001011010010110"
+          radio_garagem_2: "0110100101101001011010011001"
+          sensor_protocolo: "1"
+          sensor_garagem_1_abriu: "101010101010101010101010"
+          sensor_garagem_1_fechou: "101010101010101010101110"
+          sensor_garagem_2_abriu: "101010101010101010100101"
+          sensor_garagem_2_fechou: "101010101010101010100111"
+          EOF
+      - name: Escolhe a variante
+        working-directory: deploy/esphome
+        run: |
+          if [ "${{ matrix.variante }}" = radio ]; then
+            sed -i -e 's#porteiro/garagens-rele.yaml#porteiro/garagens-radio.yaml#' \
+                   -e 's#porteiro/sensores-fio.yaml#porteiro/sensores-radio.yaml#' porteiro.yaml
+          fi
+          grep -n '!include' porteiro.yaml
       - run: esphome compile porteiro.yaml
         working-directory: deploy/esphome

@@ -1,0 +1,52 @@
+# Sensor de abertura sem fio, 433 MHz, em cada garagem.
+#
+# Precisa do receptor no GPIO8 e de sensores que mandem um código ao abrir e
+# outro ao fechar. Os códigos vêm do `zoio portao radio` (abra e feche cada
+# garagem perto da placa) e vão no secrets.yaml:
+#   sensor_protocolo: "1"
+#   sensor_garagem_1_abriu: "0110..."
+#   sensor_garagem_1_fechou: "0110..."
+#   sensor_garagem_2_abriu: "0110..."
+#   sensor_garagem_2_fechou: "0110..."
+#
+# O estado começa desconhecido quando a placa liga, e o app mostra só
+# "Acionar" até a próxima vez que a garagem abrir ou fechar.
+
+binary_sensor:
+  - platform: template
+    name: "Garagem 1 aberta"  # vira garagem_1_aberta
+    id: garagem_1_aberta
+    device_class: garage_door
+  - platform: template
+    name: "Garagem 2 aberta"
+    id: garagem_2_aberta
+    device_class: garage_door
+
+  - platform: remote_receiver
+    id: radio_garagem_1_abriu
+    internal: true
+    receiver_id: radio_rx
+    rc_switch_raw: { code: !secret sensor_garagem_1_abriu, protocol: !secret sensor_protocolo }
+    on_press:
+      - binary_sensor.template.publish: { id: garagem_1_aberta, state: true }
+  - platform: remote_receiver
+    id: radio_garagem_1_fechou
+    internal: true
+    receiver_id: radio_rx
+    rc_switch_raw: { code: !secret sensor_garagem_1_fechou, protocol: !secret sensor_protocolo }
+    on_press:
+      - binary_sensor.template.publish: { id: garagem_1_aberta, state: false }
+  - platform: remote_receiver
+    id: radio_garagem_2_abriu
+    internal: true
+    receiver_id: radio_rx
+    rc_switch_raw: { code: !secret sensor_garagem_2_abriu, protocol: !secret sensor_protocolo }
+    on_press:
+      - binary_sensor.template.publish: { id: garagem_2_aberta, state: true }
+  - platform: remote_receiver
+    id: radio_garagem_2_fechou
+    internal: true
+    receiver_id: radio_rx
+    rc_switch_raw: { code: !secret sensor_garagem_2_fechou, protocol: !secret sensor_protocolo }
+    on_press:
+      - binary_sensor.template.publish: { id: garagem_2_aberta, state: false }

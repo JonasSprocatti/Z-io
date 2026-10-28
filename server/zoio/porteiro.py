@@ -12,6 +12,10 @@ Nomes que a placa precisa ter (deploy/esphome/porteiro.yaml):
   mas sem ele a garagem só tem o comando genérico "acionar");
 - sensor `campainha`: botão de campainha.
 
+As garagens podem ser acionadas por relé ou por rádio 433 MHz (código fixo):
+para o Zóio é igual, um botão por garagem. `radio()` escuta o receptor da
+placa para aprender os códigos do controle e dos sensores sem fio.
+
 Cada comando e cada toque da campainha vira um evento com foto da câmera
 daquela porta, e os outros aparelhos são avisados.
 """
@@ -35,6 +39,8 @@ from .esphome import EspHome, EspHomeError
 from .store import BELL_KIND, EVENT_RETENTION_DAYS, GARAGE_KIND, GATE_KIND, Store
 
 log = logging.getLogger(__name__)
+
+RC_SWITCH = re.compile(r"Received RCSwitch Raw: protocol=(\d+) data='([01]+)'")
 
 GATE_ID = "portao"
 GATE_BUTTON = "abrir_portao"
@@ -340,6 +346,23 @@ class Porteiro:
                 yield self
             finally:
                 self.board, self.online = None, False
+
+    async def radio(self, seconds: float, on_code) -> None:
+        """Escuta o rádio da placa por `seconds` segundos e chama
+        `on_code(protocolo, código)` uma vez para cada código novo."""
+        seen: set[tuple[int, str]] = set()
+
+        def on_log(line: str) -> None:
+            m = RC_SWITCH.search(line)
+            if m and (code := (int(m[1]), m[2])) not in seen:
+                seen.add(code)
+                on_code(*code)
+
+        async with self._board() as board:
+            board.on_log = on_log
+            await board.subscribe_logs()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(board.run(), seconds)
 
     async def check(self) -> dict:
         """Estado da placa para o botão "Testar" (conecta de novo se estiver fora)."""
