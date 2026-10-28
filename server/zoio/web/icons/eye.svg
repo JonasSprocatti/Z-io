@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 280">
+  <!-- marca do Zóio apagada, no fundo das câmeras enquanto o vídeo carrega -->
+  <g opacity=".16">
+    <path d="M24 140c48-80 112-120 232-120s184 40 232 120c-48 80-112 120-232 120S72 220 24 140z" fill="none" stroke="#4da3ff" stroke-width="28" stroke-linejoin="round"/>
+    <circle cx="256" cy="140" r="64" fill="#4da3ff"/>
+  </g>
+</svg>
