@@ -56,6 +56,9 @@ CREATE INDEX IF NOT EXISTS sessions_device ON sessions(device_id);
 DEVICE_FIELDS = {"name", "status", "admin", "approved_at", "approved_by", "last_seen", "gate"}
 
 GATE_KIND = "Portao"
+GARAGE_KIND = "Garagem"
+BELL_KIND = "Campainha"
+PORTARIA_KINDS = (GATE_KIND, GARAGE_KIND, BELL_KIND)
 
 EVENT_RETENTION_DAYS = 30
 
@@ -98,7 +101,7 @@ class Store:
         return {"id": cur.lastrowid, "camera": camera, "kind": kind, "status": status, "dvr_time": dvr_time, "received_at": now, "detail": detail}
 
     def events(self, limit: int = 100, before_id: int | None = None, camera: int | None = None, status: str | None = "Start") -> list[dict]:
-        """Eventos do mais novo ao mais antigo. Com `status`, os do portão entram sempre."""
+        """Eventos do mais novo ao mais antigo. Com `status`, os da portaria entram sempre."""
         sql = "SELECT * FROM events WHERE 1=1"
         args: list = []
         if before_id:
@@ -108,8 +111,8 @@ class Store:
             sql += " AND camera = ?"
             args.append(camera)
         if status:
-            sql += " AND (status = ? OR kind = ?)"
-            args += [status, GATE_KIND]
+            sql += f" AND (status = ? OR kind IN ({','.join('?' * len(PORTARIA_KINDS))}))"
+            args += [status, *PORTARIA_KINDS]
         sql += " ORDER BY id DESC LIMIT ?"
         args.append(min(limit, 500))
         rows = [dict(r) for r in self.db.execute(sql, args)]
@@ -138,18 +141,18 @@ class Store:
         self.db.execute("DELETE FROM push_subscriptions WHERE device_id = ?", (device_id,))
         self.db.commit()
 
-    def subscriptions(self, approved_only: bool = False, admins_only: bool = False) -> list[dict]:
+    def subscriptions(self, approved_only: bool = False, admins_only: bool = False, gate_only: bool = False) -> list[dict]:
         """Inscrições de push. Com a aprovação ligada, só as de aparelhos aprovados."""
         sql = (
-            "SELECT s.data, s.cameras, s.device_id, d.status, d.admin FROM push_subscriptions s "
+            "SELECT s.data, s.cameras, s.device_id, d.status, d.admin, d.gate FROM push_subscriptions s "
             "LEFT JOIN devices d ON d.id = s.device_id"
         )
         rows = self.db.execute(sql).fetchall()
         out = []
         for r in rows:
-            if (approved_only or admins_only) and r["status"] != "approved":
+            if (approved_only or admins_only or gate_only) and r["status"] != "approved":
                 continue
-            if admins_only and not r["admin"]:
+            if (admins_only and not r["admin"]) or (gate_only and not r["gate"]):
                 continue
             out.append({"sub": json.loads(r["data"]), "cameras": json.loads(r["cameras"]) if r["cameras"] else None, "device_id": r["device_id"]})
         return out

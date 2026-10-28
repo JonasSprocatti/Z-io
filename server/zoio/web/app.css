@@ -197,6 +197,19 @@ body:not(.live) .gate-btn { margin-left: auto; }
 .hold.done { background: radial-gradient(closest-side, var(--ok) 82%, transparent 83% 100%), conic-gradient(var(--ok) 1turn, var(--line) 0); }
 .hold.failed { background: radial-gradient(closest-side, var(--panel) 82%, transparent 83% 100%), conic-gradient(var(--alert) 1turn, var(--line) 0); }
 .gate-status { text-align: center; min-height: 2.8em; }
+.doors { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 10px; scrollbar-width: none; }
+.door-chip { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 36px; padding: 4px 12px; background: transparent; border-color: var(--line); color: var(--text); font-weight: 500; }
+.door-chip.on { border-color: var(--accent); background: rgba(77, 163, 255, .12); }
+.door-chip .tag { margin: 0; }
+.tag.open { background: rgba(224, 164, 58, .15); color: #e0a43a; }
+.tag.closed { background: rgba(63, 191, 127, .15); color: var(--ok); }
+.tag.moving { background: rgba(77, 163, 255, .15); color: var(--accent); }
+.tag.bell { background: rgba(224, 164, 58, .15); color: #e0a43a; }
+.ring { margin: 0 0 10px; padding: 10px 12px; border-radius: var(--radius); background: rgba(224, 164, 58, .15); color: #e0a43a; font-weight: 600; text-align: center; animation: ring 1s ease-in-out 3; }
+@keyframes ring { 50% { background: rgba(224, 164, 58, .35); } }
+.gate-offline { margin: 0 0 10px; padding: 10px 12px; border-radius: var(--radius); background: rgba(255, 90, 79, .12); color: var(--alert); font-size: 14px; }
+.stop { display: block; width: 150px; height: 150px; margin: 18px auto 8px; border-radius: 50%; background: var(--alert); border-color: var(--alert); font-size: 20px; }
+@media (prefers-reduced-motion: reduce) { .ring { animation: none; } }
 .list li img.thumb { width: 72px; height: 48px; object-fit: cover; border-radius: 6px; cursor: zoom-in; background: #000; }
 .tag.gate { background: rgba(63, 191, 127, .15); color: var(--ok); }
 .lightbox { position: fixed; inset: 0; z-index: 25; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .85); cursor: zoom-out; }

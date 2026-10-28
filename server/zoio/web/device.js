@@ -102,12 +102,18 @@ export async function rename(rec, name) {
   await save(rec);
 }
 
-// Abrir o portão pede uma assinatura nova, além da sessão: só o aparelho que
-// guarda a chave consegue, e cada desafio vale uma vez.
-export async function openGate(rec) {
-  const ch = await post('/api/gate/challenge');
-  if (ch.status !== 200) return ch;
-  const message = new TextEncoder().encode(`zoio-portao\n${ch.data.nonce}\n${rec.id}`);
+// Cada comando da portaria pede uma assinatura nova, além da sessão: só o
+// aparelho que guarda a chave consegue, cada desafio vale uma vez, e a porta e
+// o comando entram no que é assinado.
+export async function challenge() {
+  const ch = await post('/api/portaria/challenge');
+  return ch.status === 200 ? ch.data.nonce : null;
+}
+
+export async function portaria(rec, door, action, nonce) {
+  nonce = nonce ?? await challenge();
+  if (!nonce) return { status: 403, data: { error: 'sem permissão de portaria' } };
+  const message = new TextEncoder().encode(`zoio-portaria\n${nonce}\n${rec.id}\n${door}\n${action}`);
   const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, rec.keyPair.privateKey, message);
-  return post('/api/gate/open', { nonce: ch.data.nonce, signature: b64u(signature) });
+  return post('/api/portaria/act', { door, action, nonce, signature: b64u(signature) });
 }

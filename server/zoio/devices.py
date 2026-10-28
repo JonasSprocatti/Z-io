@@ -79,9 +79,12 @@ def login_message(nonce: str, device_id: str) -> bytes:
     return f"zoio-login\n{nonce}\n{device_id}".encode()
 
 
-def gate_message(nonce: str, device_id: str) -> bytes:
-    """O que o aparelho assina para abrir o portão (confirmação além da sessão)."""
-    return f"zoio-portao\n{nonce}\n{device_id}".encode()
+def portaria_message(nonce: str, device_id: str, door: str, action: str) -> bytes:
+    """O que o aparelho assina para cada comando da portaria (confirmação além da sessão).
+
+    A porta e o comando entram na assinatura: um "abrir o portão" assinado não
+    serve para outra porta nem para outro comando."""
+    return f"zoio-portaria\n{nonce}\n{device_id}\n{door}\n{action}".encode()
 
 
 def _hash_token(token: str) -> str:

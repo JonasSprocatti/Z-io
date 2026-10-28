@@ -18,7 +18,7 @@ from . import clips, config, devices, dvrip, esphome, go2rtc
 from .alarms import EventBus
 from .app import create_app
 from .esphome import EspHomeError
-from .gate import Gate, GateError
+from .porteiro import GateError, Porteiro
 from .store import Store
 from .xmstream import Demuxer
 
@@ -130,7 +130,7 @@ def manage_devices(cfg: config.Config, action: str | None, ref: str | None, comm
                 print("Nenhum aparelho cadastrado. Abra o Zóio no aparelho para ele aparecer aqui.")
             for d in items:
                 seen = datetime.fromtimestamp(d["last_seen"]).strftime("%d/%m %H:%M") if d["last_seen"] else "nunca"
-                extras = (" (admin)" if d["admin"] else "") + (" (portão)" if d["gate"] else "")
+                extras = (" (admin)" if d["admin"] else "") + (" (portaria)" if d["gate"] else "")
                 print(f"{d['code']}  {STATUS.get(d['status'], d['status']):<10} {d['name']}{extras}  · visto: {seen}  · id {d['id']}")
             if not cfg.device_approval:
                 print("Atenção: a aprovação de aparelhos está desligada (ZOIO_DEVICE_APPROVAL=0).")
@@ -151,7 +151,7 @@ def manage_devices(cfg: config.Config, action: str | None, ref: str | None, comm
             print(f"Excluído: {device['name']} ({device['code']}). Ele pode pedir acesso de novo.")
         elif action == "portao":
             device = manager.set_gate(device["id"], not deny)
-            print(f"{device['name']} ({device['code']}) {'pode' if device['gate'] else 'não pode mais'} abrir o portão.")
+            print(f"{device['name']} ({device['code']}) {'pode' if device['gate'] else 'não pode mais'} usar a portaria (portão, garagens e campainha).")
         return 0
     except devices.DeviceError as exc:
         print(f"Erro: {exc}", file=sys.stderr)
@@ -160,31 +160,44 @@ def manage_devices(cfg: config.Config, action: str | None, ref: str | None, comm
         store.close()
 
 
-def manage_gate(cfg: config.Config, action: str) -> int:
-    """Testa a placa do portão ou abre pelo Pi."""
+def manage_porteiro(cfg: config.Config, action: str, door: str | None) -> int:
+    """Testa a placa do porteiro, abre o portão ou aciona uma garagem pelo Pi."""
     if cfg.gate_error:
         print(f"Erro na configuração: {cfg.gate_error}", file=sys.stderr)
         return 1
     if not cfg.gate_enabled:
-        print("Portão não configurado: defina ZOIO_GATE_HOST e ZOIO_GATE_KEY no /etc/zoio/zoio.env.", file=sys.stderr)
+        print("Portaria não configurada: defina ZOIO_GATE_HOST e ZOIO_GATE_KEY no /etc/zoio/zoio.env.", file=sys.stderr)
         return 1
 
     async def run() -> int:
         store = Store(cfg.data_dir / "zoio.db")
-        gate = Gate(cfg, store, EventBus())
+        porteiro = Porteiro(cfg, store, EventBus())
         try:
-            if action == "testar":
-                info = await gate.check()
-                print(f"Placa {info['name']} ({info['mac'] or 'MAC ?'}), {info['version']}")
-                print(f"  botões: {', '.join(info['buttons']) or 'nenhum'}")
-                print("  ok: o botão configurado existe." if info["button_ok"] else f"  atenção: não achei o botão {cfg.gate_button!r}.")
-                return 0 if info["button_ok"] else 1
-            async with aiohttp.ClientSession() as http:
-                event = await gate.open("Pi", None, http)
+            async with porteiro.session():
+                info = porteiro.info
+                if action == "testar":
+                    print(f"Placa {info['name']} ({info['mac'] or 'MAC ?'}), {info['version']}")
+                    print(f"  botões: {', '.join(info['buttons']) or 'nenhum'}")
+                    print(f"  sensores: {', '.join(info['sensors']) or 'nenhum'}")
+                    for d in porteiro.doors.values():
+                        extra = "" if d.kind == "portao" else (" (com sensor)" if d.sensor else " (sem sensor: só acionar)")
+                        print(f"  porta {d.id}: {d.name}{extra}" + (f", câmera {d.camera}" if d.camera else ""))
+                    print("  campainha: " + ("ok" if info["doorbell"] else "não encontrada"))
+                    if "portao" not in porteiro.doors:
+                        print("  atenção: não achei o botão abrir_portao.")
+                        return 1
+                    return 0
+                target = "portao" if action == "abrir" else (door or "")
+                if target not in porteiro.doors:
+                    print(f"Porta desconhecida: {target or '(nenhuma)'}. Portas: {', '.join(porteiro.doors) or 'nenhuma'}", file=sys.stderr)
+                    return 2
+                async with aiohttp.ClientSession() as http:
+                    porteiro.http = http
+                    event = await porteiro.act(target, "abrir" if target == "portao" else "acionar", "Pi", None)
             if event["detail"]["error"]:
                 print(f"Falhou: {event['detail']['error']}", file=sys.stderr)
                 return 1
-            print("Portão aberto." + (" Foto salva." if event["detail"]["photo"] else ""))
+            print(f"{event['detail']['name']}: {event['status'].lower()}." + (" Foto salva." if event["detail"]["photo"] else ""))
             return 0
         except (EspHomeError, GateError) as exc:
             print(f"Erro: {exc}", file=sys.stderr)
@@ -208,10 +221,11 @@ def main() -> None:
     d = sub.add_parser("aparelhos", help="lista, aprova ou revoga aparelhos")
     d.add_argument("acao", nargs="?", choices=["listar", "aprovar", "revogar", "excluir", "portao"])
     d.add_argument("codigo", nargs="?", help="código mostrado no aparelho (ex.: ABCD-EFGH) ou id")
-    d.add_argument("--comum", action="store_true", help="aprova sem permissão de aprovar outros aparelhos nem de abrir o portão")
-    d.add_argument("--nao", action="store_true", help="com 'portao': tira a permissão de abrir o portão")
-    pt = sub.add_parser("portao", help="placa do portão: gerar chave, testar ou abrir")
-    pt.add_argument("acao", choices=["chave", "testar", "abrir"])
+    d.add_argument("--comum", action="store_true", help="aprova sem permissão de aprovar outros aparelhos nem de usar a portaria")
+    d.add_argument("--nao", action="store_true", help="com 'portao': tira a permissão de portaria")
+    pt = sub.add_parser("portao", help="placa do porteiro: gerar chave, testar, abrir o portão ou acionar uma garagem")
+    pt.add_argument("acao", choices=["chave", "testar", "abrir", "acionar"])
+    pt.add_argument("porta", nargs="?", help="com 'acionar': garagem_1, garagem_2...")
     args = parser.parse_args()
 
     if args.cmd == "portao" and args.acao == "chave":  # não precisa da configuração
@@ -232,7 +246,7 @@ def main() -> None:
     elif args.cmd == "aparelhos":
         sys.exit(manage_devices(cfg, args.acao, args.codigo, args.comum, args.nao))
     elif args.cmd == "portao":
-        sys.exit(manage_gate(cfg, args.acao))
+        sys.exit(manage_porteiro(cfg, args.acao, args.porta))
 
 
 if __name__ == "__main__":

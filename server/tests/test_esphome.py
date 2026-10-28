@@ -25,31 +25,55 @@ def test_key_validation():
 async def test_press_button_over_encrypted_api():
     board = await FakeEspHome(KEY).start()
     try:
-        async with eh.EspHome("127.0.0.1", board.port, KEY, expected_name="zoio-portao") as dev:
-            assert (dev.name, dev.mac, dev.server_info) == ("zoio-portao", "AA:BB:CC:DD:EE:FF", "fake 2026.10")
-            assert await dev.buttons() == {"abrir_portao": (0x1234ABCD, "Abrir portao")}
-            assert await dev.press("abrir_portao") == "abrir_portao"
+        async with eh.EspHome("127.0.0.1", board.port, KEY, expected_name="zoio-porteiro") as dev:
+            assert (dev.name, dev.mac, dev.server_info) == ("zoio-porteiro", "AA:BB:CC:DD:EE:FF", "fake 2026.10")
+            ents = await dev.entities()
+            assert ents.buttons["abrir_portao"] == (0x1234ABCD, "Abrir portao")
+            assert ents.binary_sensors == {"campainha": (0x3000, "Campainha"), "garagem_1_aberta": (0x3001, "Garagem 1 aberta")}
+            await dev.press(0x1234ABCD)
+            assert board.pressed == [0x1234ABCD]  # a resposta ao ping só chega depois do comando
         await asyncio.sleep(0.05)
     finally:
         await board.stop()
-    assert board.pressed == [0x1234ABCD]
     assert board.hello[1] == b"zoio"
     assert board.pongs == 1  # respondeu ao ping que a placa mandou
     assert board.disconnects == 1
 
 
-async def test_single_button_is_used_when_name_differs():
-    board = await FakeEspHome(KEY, buttons={"abrir": (5, "Abrir")}).start()
+async def test_states_arrive_while_running():
+    board = await FakeEspHome(KEY).start()
+    seen = []
     try:
         async with eh.EspHome("127.0.0.1", board.port, KEY) as dev:
-            assert await dev.press("abrir_portao") == "abrir"
-        board.buttons = {"a": (1, "A"), "b": (2, "B")}
-        async with eh.EspHome("127.0.0.1", board.port, KEY) as dev:
-            with pytest.raises(eh.EspHomeError, match="não existe"):
-                await dev.press("abrir_portao")
+            await dev.entities()
+            dev.on_state = lambda key, state: seen.append((key, state))
+            await dev.subscribe_states()
+            task = asyncio.create_task(dev.run())
+            await asyncio.sleep(0.05)
+            assert seen == [(0x3000, False), (0x3001, False)]  # leitura inicial; o sensor sem leitura fica de fora
+            await board.set_state("campainha", True)
+            assert seen[-1] == (0x3000, True)
+            await dev.press(0x2001)  # com a leitura rodando, a confirmação vem pelo run()
+            assert board.pressed == [0x2001]
+            await board.stop()
+            with pytest.raises(eh.EspHomeError, match="fechou a conexão"):
+                await asyncio.wait_for(task, 2)
     finally:
         await board.stop()
-    assert board.pressed == [5]
+
+
+async def test_silent_board_is_dropped(monkeypatch):
+    monkeypatch.setattr(eh, "KEEPALIVE", 0.2)
+    monkeypatch.setattr(eh, "DEAD_AFTER", 0.5)
+    board = await FakeEspHome(KEY).start()
+    try:
+        async with eh.EspHome("127.0.0.1", board.port, KEY) as dev:
+            await dev.entities()
+            board.silent = True
+            with pytest.raises(eh.EspHomeError, match="parou de responder"):
+                await asyncio.wait_for(dev.run(), 3)
+    finally:
+        await board.stop()
 
 
 async def test_wrong_key_wrong_name_and_plaintext():

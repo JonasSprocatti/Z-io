@@ -47,7 +47,7 @@
   <header class="top">
     <h1>Zóio</h1>
     <span id="status" class="status" title="Estado do servidor"></span>
-    <button id="gate-btn" class="gate-btn" type="button" hidden>Portão</button>
+    <button id="gate-btn" class="gate-btn" type="button" hidden>Portaria</button>
     <div class="layout" id="layout-picker" role="group" aria-label="Câmeras por linha">
       <button data-cols="1" aria-label="1 por linha">1</button>
       <button data-cols="2" aria-label="2 por linha">2</button>
@@ -117,7 +117,7 @@
       <div class="card">
         <h2>Servidor</h2>
         <ul id="server-info" class="kv"></ul>
-        <div class="row"><button id="gate-test" class="ghost" type="button" hidden>Testar placa do portão</button></div>
+        <div class="row"><button id="gate-test" class="ghost" type="button" hidden>Testar placa do porteiro</button></div>
       </div>
     </section>
   </main>
@@ -132,18 +132,22 @@
   <section id="gate" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="gate-title">
     <div class="sheet-box">
       <div class="sheet-bar">
-        <strong id="gate-title">Portão</strong>
+        <strong id="gate-title">Portaria</strong>
         <button id="gate-close" class="ghost" type="button">Fechar</button>
       </div>
+      <p id="gate-ring" class="ring" role="status" hidden></p>
+      <p id="gate-offline" class="gate-offline" hidden>A placa do porteiro está desconectada. Os comandos não chegam até ela.</p>
+      <div id="gate-doors" class="doors" role="tablist" aria-label="Portas"></div>
       <div id="gate-video" class="gate-video"></div>
       <button id="gate-hold" class="hold" type="button" aria-describedby="gate-status">
         <span id="gate-hold-label">Segure para abrir</span>
       </button>
+      <button id="gate-stop" class="stop" type="button" hidden>Parar</button>
       <p id="gate-status" class="muted gate-status">Mantenha o botão apertado até completar o círculo.</p>
     </div>
   </section>
 
-  <div id="lightbox" class="lightbox" hidden><img alt="Foto do portão no momento da abertura"></div>
+  <div id="lightbox" class="lightbox" hidden><img alt="Foto tirada no momento do registro"></div>
 
   <div id="toast" class="toast" hidden></div>
   <script type="module" src="/web/app.js"></script>

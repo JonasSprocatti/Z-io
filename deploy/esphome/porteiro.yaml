@@ -1,0 +1,133 @@
+# Placa do porteiro do Zóio: ESP32-S3 no portão.
+#
+# Faz tudo o que fica no portão: campainha, fechadura do portão de pedestre e
+# a botoeira dos motores das duas garagens, com o sensor magnético de cada uma.
+# A conversa (microfone e alto-falante) entra na parte 2.
+#
+# Ligação (ESP32-S3-DevKitC-1):
+#   GPIO10 → IN1 do módulo relé: fechadura do portão
+#   GPIO11 → IN2: botoeira da central da garagem 1
+#   GPIO12 → IN3: botoeira da central da garagem 2
+#   GPIO13 ← sensor magnético da garagem 1 (o outro fio no GND)
+#   GPIO14 ← sensor magnético da garagem 2 (o outro fio no GND)
+#   GPIO17 ← botão da campainha (o outro fio no GND)
+#
+# Os nomes dos botões e sensores são os que o Zóio procura: não mude.
+# Os nomes que aparecem no app ficam no zoio.env (ZOIO_GARAGE_NAMES).
+#
+# Segurança:
+# - só a API nativa do ESPHome, cifrada com a chave (a mesma do ZOIO_GATE_KEY);
+# - sem servidor web, sem atualização pela rede (OTA) e sem ponto de acesso de
+#   emergência: ninguém por perto consegue reconfigurar ou regravar a placa.
+#   Para atualizar, ela volta para o USB do Pi;
+# - o tempo de cada pulso está gravado aqui: nenhum comando segura um relé ligado.
+#
+# Os segredos (Wi-Fi e chave) ficam num secrets.yaml gerado no Pi, fora do Git.
+
+substitutions:
+  rele_invertido: "true"  # a maioria dos módulos aciona com nível baixo
+  pulso_portao: 1s        # quanto tempo a fechadura recebe energia
+  pulso_garagem: 700ms    # quanto tempo a botoeira do motor fica fechada
+  sensor_invertido: "false"  # "true" se o sensor fechar o contato com a garagem aberta
+
+esphome:
+  name: zoio-porteiro
+  friendly_name: Porteiro
+  on_boot:
+    priority: 800
+    then:
+      - output.turn_off: rele_portao
+      - output.turn_off: rele_garagem_1
+      - output.turn_off: rele_garagem_2
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none  # resposta rápida (a placa fica na tomada)
+
+api:
+  encryption:
+    key: !secret api_key
+  reboot_timeout: 0s  # sem o Zóio por perto, a placa continua de pé
+
+output:
+  - platform: gpio
+    id: rele_portao
+    pin: { number: GPIO10, inverted: "${rele_invertido}" }
+  - platform: gpio
+    id: rele_garagem_1
+    pin: { number: GPIO11, inverted: "${rele_invertido}" }
+  - platform: gpio
+    id: rele_garagem_2
+    pin: { number: GPIO12, inverted: "${rele_invertido}" }
+
+script:
+  - id: pulso_portao
+    mode: single  # apertos repetidos durante o pulso são ignorados
+    then:
+      - output.turn_on: rele_portao
+      - delay: ${pulso_portao}
+      - output.turn_off: rele_portao
+  - id: pulso_garagem_1
+    mode: single
+    then:
+      - output.turn_on: rele_garagem_1
+      - delay: ${pulso_garagem}
+      - output.turn_off: rele_garagem_1
+  - id: pulso_garagem_2
+    mode: single
+    then:
+      - output.turn_on: rele_garagem_2
+      - delay: ${pulso_garagem}
+      - output.turn_off: rele_garagem_2
+
+button:
+  - platform: template
+    name: "Abrir portao"  # vira abrir_portao
+    icon: mdi:gate-open
+    on_press:
+      - script.execute: pulso_portao
+  - platform: template
+    name: "Garagem 1"  # vira garagem_1
+    icon: mdi:garage
+    on_press:
+      - script.execute: pulso_garagem_1
+  - platform: template
+    name: "Garagem 2"
+    icon: mdi:garage
+    on_press:
+      - script.execute: pulso_garagem_2
+
+binary_sensor:
+  - platform: gpio
+    name: "Campainha"
+    pin: { number: GPIO17, mode: { input: true, pullup: true }, inverted: true }
+    filters:
+      - delayed_on: 30ms   # ignora ruído no fio
+      - delayed_off: 2s    # segura o "tocou" o bastante para chegar no Zóio
+  - platform: gpio
+    name: "Garagem 1 aberta"
+    device_class: garage_door
+    pin: { number: GPIO13, mode: { input: true, pullup: true }, inverted: "${sensor_invertido}" }
+    filters:
+      - delayed_on_off: 300ms
+  - platform: gpio
+    name: "Garagem 2 aberta"
+    device_class: garage_door
+    pin: { number: GPIO14, mode: { input: true, pullup: true }, inverted: "${sensor_invertido}" }
+    filters:
+      - delayed_on_off: 300ms
+
+sensor:
+  - platform: wifi_signal
+    name: "Sinal Wi-Fi"  # o Zóio mostra em Ajustes: ajuda a saber se precisa de repetidor
+    update_interval: 60s

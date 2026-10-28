@@ -12,7 +12,9 @@ Fluxo:
 1. Handshake Noise_NNpsk0_25519_ChaChaPoly_SHA256 (prólogo "NoiseAPIInit\\0\\0").
 2. HelloRequest → HelloResponse (nome da placa e versão da API).
 3. ListEntitiesRequest → um ListEntities*Response por entidade, até o Done.
-4. ButtonCommandRequest(key), seguido de um Ping para confirmar que a placa
+4. SubscribeStatesRequest: a placa manda o estado atual de cada sensor e,
+   depois, cada mudança (campainha, sensores das garagens).
+5. ButtonCommandRequest(key), seguido de um Ping para confirmar que a placa
    processou o comando (a resposta ao ping só chega depois dele).
 
 Quadros: 0x01, tamanho (u16 big-endian) e o conteúdo. Depois do handshake,
@@ -23,10 +25,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import collections
 import hashlib
 import hmac
 import secrets
 import struct
+import time
+from dataclasses import dataclass, field
+from typing import Callable
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
@@ -46,9 +52,17 @@ DISCONNECT_RESPONSE = 6
 PING_REQUEST = 7
 PING_RESPONSE = 8
 LIST_ENTITIES_REQUEST = 11
+LIST_ENTITIES_BINARY_SENSOR = 12
+LIST_ENTITIES_SENSOR = 16
 LIST_ENTITIES_DONE = 19
+SUBSCRIBE_STATES = 20
+BINARY_SENSOR_STATE = 21
+SENSOR_STATE = 25
 LIST_ENTITIES_BUTTON = 61
 BUTTON_COMMAND = 62
+
+KEEPALIVE = 20  # segundos sem ouvir a placa até mandar um ping
+DEAD_AFTER = 50  # segundos sem resposta nenhuma: conexão perdida
 
 
 class EspHomeError(Exception):
@@ -91,6 +105,10 @@ def pb_uint(field: int, value: int) -> bytes:
 
 def pb_fixed32(field: int, value: int) -> bytes:
     return _varint(field << 3 | 5) + struct.pack("<I", value)
+
+
+def pb_float(field: int, value: float) -> bytes:
+    return _varint(field << 3 | 5) + struct.pack("<f", value)
 
 
 def pb_parse(data: bytes) -> dict[int, object]:
@@ -214,8 +232,22 @@ class _Handshake:
 # ---------------------------------------------------------------- conexão
 
 
+@dataclass
+class Entities:
+    """Entidades da placa, por object_id: (chave numérica, nome)."""
+
+    buttons: dict[str, tuple[int, str]] = field(default_factory=dict)
+    binary_sensors: dict[str, tuple[int, str]] = field(default_factory=dict)
+    sensors: dict[str, tuple[int, str]] = field(default_factory=dict)  # numéricos (sinal do Wi-Fi...)
+
+
 class EspHome:
-    """Uma conexão curta com a placa: abre, faz o que precisa e fecha."""
+    """Conexão com a placa.
+
+    Dá para usar de dois jeitos: curta (conecta, aperta um botão e fecha, como
+    no `zoio portao testar`) ou permanente, com `run()` lendo tudo o que a placa
+    manda e entregando as mudanças de estado em `on_state(chave, estado)`.
+    """
 
     def __init__(self, host: str, port: int, key: str, expected_name: str | None = None, timeout: float = 5.0, client_info: str = "zoio"):
         self.host, self.port = host, port
@@ -226,10 +258,16 @@ class EspHome:
         self.name: str | None = None
         self.mac: str | None = None
         self.server_info: str | None = None
+        self.on_state: Callable[[int, bool], None] | None = None  # sensores binários
+        self.on_value: Callable[[int, float], None] | None = None  # sensores numéricos
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._send: _Cipher | None = None
         self._recv: _Cipher | None = None
+        self._pongs: collections.deque[asyncio.Future] = collections.deque()
+        self._reading = False
+        self._last_rx = 0.0
+        self._dead = False
 
     async def __aenter__(self) -> "EspHome":
         try:
@@ -262,31 +300,51 @@ class EspHome:
                 raise EspHomeError(f"resposta inesperada da placa (0x{header[0]:02x})")
             return await self._reader.readexactly(struct.unpack(">H", header[1:])[0])
         except asyncio.IncompleteReadError as exc:
-            raise EspHomeError("a placa fechou a conexão") from exc
+            raise EspHomeError("a placa parou de responder" if self._dead else "a placa fechou a conexão") from exc
 
     def _send_message(self, msg_type: int, data: bytes = b"") -> None:
+        # Sem await no meio: cifrar e escrever acontecem juntos, na ordem do contador.
         self._write_frame(self._send.encrypt(struct.pack(">HH", msg_type, len(data)) + data))
 
     async def _read_message(self) -> tuple[int, bytes]:
         plain = self._recv.decrypt(await self._read_frame())
         if len(plain) < 4:
             raise EspHomeError("mensagem curta demais")
+        self._last_rx = time.monotonic()
         msg_type = struct.unpack(">H", plain[:2])[0]
         return msg_type, plain[4:]
+
+    async def _dispatch(self, msg_type: int, data: bytes) -> None:
+        """Trata o que é da própria conexão (pings, desconexão, estados)."""
+        if msg_type == PING_REQUEST:
+            self._send_message(PING_RESPONSE)
+            await self._writer.drain()
+        elif msg_type == PING_RESPONSE:
+            if self._pongs:
+                fut = self._pongs.popleft()
+                if not fut.done():
+                    fut.set_result(None)
+        elif msg_type == DISCONNECT_REQUEST:
+            self._send_message(DISCONNECT_RESPONSE)
+            await self._writer.drain()
+            raise EspHomeError("a placa encerrou a conexão")
+        elif msg_type == BINARY_SENSOR_STATE and self.on_state:
+            fields = pb_parse(data)
+            if not fields.get(3):  # missing_state: sensor ainda sem leitura
+                self.on_state(int(fields.get(1, 0)), bool(fields.get(2, 0)))
+        elif msg_type == SENSOR_STATE and self.on_value:
+            fields = pb_parse(data)
+            if not fields.get(3):
+                value = struct.unpack("<f", struct.pack("<I", int(fields.get(2, 0))))[0]
+                self.on_value(int(fields.get(1, 0)), value)
+        # outras mensagens (logs, outros sensores) não interessam
 
     async def _wait_for(self, *types: int) -> tuple[int, bytes]:
         while True:
             msg_type, data = await self._read_message()
             if msg_type in types:
                 return msg_type, data
-            if msg_type == PING_REQUEST:
-                self._send_message(PING_RESPONSE)
-                await self._writer.drain()
-            elif msg_type == DISCONNECT_REQUEST:
-                self._send_message(DISCONNECT_RESPONSE)
-                await self._writer.drain()
-                raise EspHomeError("a placa encerrou a conexão")
-            # outras mensagens (estados, logs) não interessam aqui
+            await self._dispatch(msg_type, data)
 
     # ---- etapas ----
 
@@ -326,30 +384,81 @@ class EspHome:
         if self.expected_name and self.name != self.expected_name:
             raise EspHomeError(f"a placa se apresentou como {self.name!r}, esperado {self.expected_name!r}")
 
-    async def buttons(self) -> dict[str, tuple[int, str]]:
-        """Botões da placa: object_id → (chave numérica, nome)."""
+    async def entities(self) -> Entities:
+        """Lista botões e sensores. Use antes de `run()`."""
         self._send_message(LIST_ENTITIES_REQUEST)
         await self._writer.drain()
-        found: dict[str, tuple[int, str]] = {}
+        found = Entities()
+        kinds = {LIST_ENTITIES_BUTTON: found.buttons, LIST_ENTITIES_BINARY_SENSOR: found.binary_sensors, LIST_ENTITIES_SENSOR: found.sensors}
         while True:
-            msg_type, data = await asyncio.wait_for(self._wait_for(LIST_ENTITIES_BUTTON, LIST_ENTITIES_DONE), self.timeout)
+            msg_type, data = await asyncio.wait_for(self._wait_for(LIST_ENTITIES_DONE, *kinds), self.timeout)
             if msg_type == LIST_ENTITIES_DONE:
                 return found
             fields = pb_parse(data)
-            found[_text(fields.get(1))] = (int(fields.get(2, 0)), _text(fields.get(3)))
+            kinds[msg_type][_text(fields.get(1))] = (int(fields.get(2, 0)), _text(fields.get(3)))
 
-    async def press(self, object_id: str) -> str:
-        """Aperta um botão e espera a placa confirmar. Devolve o object_id usado."""
-        buttons = await self.buttons()
-        if object_id not in buttons:
-            if len(buttons) != 1:
-                raise EspHomeError(f"botão {object_id!r} não existe na placa (achei: {', '.join(buttons) or 'nenhum'})")
-            object_id = next(iter(buttons))
-        self._send_message(BUTTON_COMMAND, pb_fixed32(1, buttons[object_id][0]))
+    async def subscribe_states(self) -> None:
+        self._send_message(SUBSCRIBE_STATES)
+        await self._writer.drain()
+
+    async def ping(self) -> None:
+        """Espera a placa responder um ping: tudo o que foi mandado antes já foi tratado."""
+        fut = asyncio.get_running_loop().create_future()
+        self._pongs.append(fut)
         self._send_message(PING_REQUEST)
         await self._writer.drain()
-        await asyncio.wait_for(self._wait_for(PING_RESPONSE), self.timeout)
-        return object_id
+        if self._reading:
+            await asyncio.wait_for(asyncio.shield(fut), self.timeout)
+            return
+
+        async def read_until_pong() -> None:
+            while not fut.done():
+                await self._dispatch(*await self._read_message())
+
+        await asyncio.wait_for(read_until_pong(), self.timeout)
+
+    async def press(self, key: int) -> None:
+        """Aperta o botão de chave `key` e espera a placa confirmar."""
+        self._send_message(BUTTON_COMMAND, pb_fixed32(1, key))
+        try:
+            await self.ping()
+        except asyncio.TimeoutError as exc:
+            raise EspHomeError("a placa não confirmou o comando") from exc
+
+    async def run(self) -> None:
+        """Lê a conexão até ela cair (sempre termina com EspHomeError)."""
+        self._reading = True
+        self._last_rx = time.monotonic()
+        keepalive = asyncio.create_task(self._keepalive())
+        try:
+            while True:
+                await self._dispatch(*await self._read_message())
+        finally:
+            self._reading = False
+            keepalive.cancel()
+            while self._pongs:
+                fut = self._pongs.popleft()
+                if not fut.done():
+                    fut.set_exception(EspHomeError("a conexão com a placa caiu"))
+
+    async def _keepalive(self) -> None:
+        """Pinga a placa quando ela fica quieta; sem resposta, derruba a conexão."""
+        while True:
+            await asyncio.sleep(KEEPALIVE / 2)
+            idle = time.monotonic() - self._last_rx
+            if idle > DEAD_AFTER:
+                self._dead = True
+                self._writer.close()
+                return
+            if idle > KEEPALIVE:
+                fut = asyncio.get_running_loop().create_future()
+                fut.add_done_callback(lambda f: f.exception())  # ninguém espera este
+                self._pongs.append(fut)
+                self._send_message(PING_REQUEST)
+                try:
+                    await self._writer.drain()
+                except OSError:
+                    return
 
     async def close(self) -> None:
         writer = self._writer

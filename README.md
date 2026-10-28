@@ -71,11 +71,11 @@ Detalhes que importam:
 
 Para atualizar: `git pull && sudo ./deploy/install.sh`.
 
-## Portão
+## Portaria
 
-O Zóio também abre o portão da rua, com uma placa ESP32 + relé (ESPHome) ligada no botão de abrir do porteiro. O botão **Portão** aparece no topo do app só nos aparelhos com essa permissão. É preciso segurar até completar o círculo, e cada abertura fica em Alertas com quem abriu e uma foto da câmera do portão.
+Com uma placa ESP32 no portão (ESPHome), o Zóio vira o porteiro da casa. Quem tem a permissão de portaria recebe uma notificação quando tocam a campainha, que abre a câmera do portão ao vivo. No botão **Portaria** do app, vê a câmera, abre o portão e abre ou fecha as garagens, que mostram se estão abertas ou fechadas. Os comandos precisam ser segurados até completar o círculo, fechar uma garagem exige ver ela ao vivo, e tudo fica em Alertas com quem fez e uma foto. Falar e ouvir pelo celular é a próxima parte.
 
-Sem a placa configurada, nada disso aparece. Peças, ligação, programação da placa e configuração estão em [docs/portao.md](docs/portao.md).
+Sem a placa configurada, nada disso aparece. Peças, ligação, programação da placa e configuração estão em [docs/porteiro.md](docs/porteiro.md).
 
 ## Ajustes recomendados no DVR
 
@@ -99,8 +99,9 @@ pip install -e '.[test]'
 pytest
 ```
 
-Os testes usam um DVR simulado (`tests/fake_dvr.py`), que fala DVRIP, uma placa ESPHome simulada (`tests/fake_esphome.py`) e um go2rtc simulado. Eles cobrem login, busca paginada, download e conversão para MP4 (conferida com o ffprobe), alarmes, Web Push, controle de acesso, o proxy do ao vivo, a aprovação de aparelhos (assinaturas, desafio de uso único, revogação e linha de comando) e o portão (criptografia da API do ESPHome, permissão, assinatura a cada abertura, registro e foto).
+Os testes usam um DVR simulado (`tests/fake_dvr.py`), que fala DVRIP, uma placa ESPHome simulada (`tests/fake_esphome.py`) e um go2rtc simulado. Eles cobrem login, busca paginada, download e conversão para MP4 (conferida com o ffprobe), alarmes, Web Push, controle de acesso, o proxy do ao vivo, a aprovação de aparelhos (assinaturas, desafio de uso único, revogação e linha de comando) e a portaria (criptografia da API do ESPHome, sensores, campainha, regras das garagens, permissão, assinatura a cada comando, reconexão, registro e foto). O firmware da placa é compilado no GitHub a cada mudança.
 
 ## Próximas fases
 
-- Portão: falta a placa. O software está pronto e espera as peças e a confirmação da ligação.
+- Portaria, parte 2: falar e ouvir pelo celular, no estilo "aperte para falar".
+- Portaria: falta a placa. O software da parte 1 está pronto e espera as peças e a confirmação da ligação.
