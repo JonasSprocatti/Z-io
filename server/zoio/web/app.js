@@ -272,25 +272,37 @@ function renderRecordings(params) {
 
 function showPhoto(eventId) {
   const box = $('#lightbox');
-  box.querySelector('img').src = `/api/gate/photos/${eventId}.jpg`;
+  box.querySelector('img').src = `/api/portaria/photos/${eventId}.jpg`;
   box.hidden = false;
 }
 
-function gateItem(ev, when, date) {
+const PORTARIA_KINDS = new Set(['Portao', 'Garagem', 'Campainha']);
+
+// Portão, garagens e campainha: quem fez, o resultado e a foto daquela hora.
+function portariaItem(ev, when, date) {
   const d = ev.detail ?? {};
-  const ok = ev.status === 'Aberto';
+  const failed = ev.status === 'Falhou';
+  let title;
+  let who = d.by ? `por ${d.by}` : null;
+  if (ev.kind === 'Campainha') title = 'Campainha tocou';
+  else if (ev.kind === 'Portao') title = failed ? 'Portão não abriu' : 'Portão aberto';
+  else if (ev.status === 'Abriu' || ev.status === 'Fechou') {
+    title = `${d.name ?? 'Garagem'} ${ev.status === 'Abriu' ? 'abriu' : 'fechou'}`;
+    who = 'pelo controle ou na mão';
+  } else title = failed ? `${d.name ?? 'Garagem'}: comando falhou` : `${d.name ?? 'Garagem'}: ${ev.status.toLowerCase()}`;
+  const tag = { Campainha: ['bell', 'campainha'], Portao: ['gate', 'portão'], Garagem: ['gate', 'garagem'] }[ev.kind];
   return el('li', {},
-    d.photo ? el('img', { class: 'thumb', src: `/api/gate/photos/${ev.id}.jpg`, alt: 'Foto do portão', loading: 'lazy', onclick: () => showPhoto(ev.id) }) : null,
+    d.photo ? el('img', { class: 'thumb', src: `/api/portaria/photos/${ev.id}.jpg`, alt: `Foto: ${title}`, loading: 'lazy', onclick: () => showPhoto(ev.id) }) : null,
     el('div', { class: 'main' },
-      el('div', {}, ok ? 'Portão aberto ' : 'Portão não abriu ', el('span', { class: ok ? 'tag gate' : 'tag' }, 'portão')),
-      el('div', { class: 'sub' }, [`por ${d.by ?? '?'}`, when.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }), ok ? null : d.error].filter(Boolean).join(' · '))),
+      el('div', {}, `${title} `, el('span', { class: failed ? 'tag' : `tag ${tag[0]}` }, tag[1])),
+      el('div', { class: 'sub' }, [who, when.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }), failed ? d.error : null].filter(Boolean).join(' · '))),
     ev.camera ? el('a', { class: 'ghost', href: `#gravacoes?cam=${ev.camera}&date=${date}` }, 'Gravação') : null);
 }
 
 function alertItem(ev) {
   const when = new Date(ev.received_at * 1000);
   const date = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
-  if (ev.kind === 'Portao') return gateItem(ev, when, date);
+  if (PORTARIA_KINDS.has(ev.kind)) return portariaItem(ev, when, date);
   return el('li', {},
     el('div', { class: 'main' },
       el('div', {}, ev.name ?? camName(ev.camera), ' ', el('span', { class: 'tag' }, ev.kind === 'VideoMotion' ? 'movimento' : ev.kind)),
@@ -325,12 +337,15 @@ function listenEvents() {
       refreshDevices();
       return;
     }
-    if (ev.type === 'gate') {
+    if (ev.type === 'portaria') { portariaUpdate(ev); return; }
+    if (ev.type === 'porta' || ev.type === 'campainha') {
       const list = $('#alert-list');
       list.querySelector('.empty')?.remove();
       if (list.childElementCount) list.prepend(alertItem(ev));
-      if (ev.detail?.device_id !== state.me?.device?.id) {
-        toast(ev.status === 'Aberto' ? `Portão aberto por ${ev.detail?.by}.` : `Tentativa de abrir o portão falhou (${ev.detail?.by}).`, 5000);
+      if (ev.type === 'campainha') { ringed(ev); return; }
+      const d = ev.detail ?? {};
+      if (d.by && d.device_id !== state.me?.device?.id) {
+        toast(ev.status === 'Falhou' ? `${d.name}: comando de ${d.by} falhou.` : `${d.name}: ${ev.status.toLowerCase()} por ${d.by}.`, 5000);
       }
       return;
     }
@@ -414,30 +429,145 @@ async function disablePush() {
   renderPush();
 }
 
-// ------------------------------------------------------------------ portão
+// ------------------------------------------------------------------ portaria
 
 const HOLD_MS = 1200;
+const gate = { door: 'portao', nonce: null, nonceAt: 0, timer: 0, busy: false, chips: '' };
+const ACTION_LABEL = { abrir: 'abrir', fechar: 'fechar', acionar: 'acionar' };
+const portaria = () => state.config.portaria ?? { doors: [] };
+const currentDoor = () => portaria().doors.find((d) => d.id === gate.door) ?? portaria().doors[0];
+const serverNow = () => Date.now() / 1000 + (state.clockSkew ?? 0); // relógio do Pi
 
-function setupGate() {
-  const gate = state.config.gate;
-  $('#gate-btn').hidden = !(gate?.enabled && gate.allowed);
+// Mesma regra do servidor (que confere de novo): fechar só com o sensor dizendo "aberta".
+function doorActions(d) {
+  if (d.kind === 'portao') return ['abrir'];
+  if (serverNow() < d.moving_until) return ['parar'];
+  if (!d.sensor || d.unsure || d.open === null) return ['acionar'];
+  return [d.open ? 'fechar' : 'abrir'];
 }
 
-async function openGateSheet() {
+function setupGate() {
+  const p = portaria();
+  $('#gate-btn').hidden = !(p.enabled && p.allowed);
+}
+
+function doorState(d) {
+  if (d.kind === 'portao') return null;
+  if (serverNow() < d.moving_until) return ['moving', 'em movimento'];
+  if (d.open === true) return ['open', 'aberta'];
+  if (d.open === false) return ['closed', 'fechada'];
+  return null;
+}
+
+// Um desafio pedido antes, para o comando (principalmente o Parar) sair na hora.
+async function takeNonce() {
+  let nonce = Date.now() - gate.nonceAt < 90000 ? gate.nonce : null;
+  gate.nonce = null;
+  nonce ??= await device.challenge();
+  device.challenge().then((n) => { gate.nonce = n; gate.nonceAt = Date.now(); }).catch(() => {});
+  return nonce;
+}
+
+async function openGateSheet(door) {
+  const p = portaria();
+  if (!(p.enabled && p.allowed)) return;
+  if (door) gate.door = door;
+  if (!p.doors.some((d) => d.id === gate.door)) gate.door = p.doors[0]?.id ?? 'portao';
+  const wasHidden = $('#gate').hidden;
   $('#gate').hidden = false;
-  resetHold('Segure para abrir', 'Mantenha o botão apertado até completar o círculo.');
-  const cam = state.cameras.find((c) => c.number === state.config.gate?.camera);
-  const box = $('#gate-video');
-  box.replaceChildren();
-  if (cam) {
-    await loadPlayer().catch(() => {});
-    if (!$('#gate').hidden) box.replaceChildren(makeStream(cam.sub, { controls: false }));
+  if (wasHidden) {
+    gate.nonceAt = 0;
+    takeNonce().then((n) => { gate.nonce = n; gate.nonceAt = Date.now(); }).catch(() => {});
+    clearInterval(gate.timer);
+    gate.timer = setInterval(tickGate, 1000); // contagem do Parar e vídeo pronto
   }
+  renderGateSheet(true);
 }
 
 function closeGateSheet() {
   $('#gate').hidden = true;
+  $('#gate-ring').hidden = true;
   $('#gate-video').replaceChildren(); // desliga o vídeo
+  clearInterval(gate.timer);
+  if (location.hash.startsWith('#portaria')) history.replaceState(null, '', '#ao-vivo');
+}
+
+const chipsSignature = () => `${gate.door}|` + portaria().doors.map((d) => `${d.id}:${d.name}:${doorState(d)?.[0] ?? ''}`).join(',');
+
+function renderChips() {
+  const p = portaria();
+  $('#gate-doors').replaceChildren(...p.doors.map((d) => {
+    const st = doorState(d);
+    return el('button', {
+      class: `door-chip${d.id === gate.door ? ' on' : ''}`, type: 'button', role: 'tab', 'aria-selected': String(d.id === gate.door),
+      onclick: () => { if (gate.door !== d.id) { gate.door = d.id; renderGateSheet(true); } },
+    }, d.name, st ? el('span', { class: `tag ${st[0]}` }, st[1]) : null);
+  }));
+  $('#gate-doors').hidden = p.doors.length < 2;
+  gate.chips = chipsSignature();
+}
+
+function tickGate() {
+  if (chipsSignature() !== gate.chips) renderChips(); // fim do tempo de manobra
+  renderGateControls();
+}
+
+async function renderGateSheet(changedDoor) {
+  const p = portaria();
+  $('#gate-offline').hidden = p.online !== false;
+  renderChips();
+  const door = currentDoor();
+  $('#gate-title').textContent = p.doors.length > 1 ? 'Portaria' : (door?.name ?? 'Portão');
+  if (changedDoor) {
+    resetHold(undefined, '');
+    const cam = state.cameras.find((c) => c.number === door?.camera);
+    const box = $('#gate-video');
+    box.replaceChildren();
+    if (cam) {
+      await loadPlayer().catch(() => {});
+      if (!$('#gate').hidden && currentDoor()?.id === door.id) box.replaceChildren(makeStream(cam.sub, { controls: false }));
+    }
+  }
+  renderGateControls();
+}
+
+// Fechar a garagem de longe só com o vídeo dela rodando na tela.
+function needsVideo(door, action) {
+  return door.kind === 'garagem' && (action === 'fechar' || action === 'acionar');
+}
+function videoPlaying() {
+  const v = $('#gate-video video');
+  return !!v && v.readyState >= 2 && !v.paused;
+}
+
+function renderGateControls() {
+  const door = currentDoor();
+  const hold = $('#gate-hold');
+  const stop = $('#gate-stop');
+  if (!door) {
+    hold.hidden = true; stop.hidden = true;
+    $('#gate-status').textContent = portaria().online === false ? '' : 'Nenhuma porta encontrada na placa do porteiro.';
+    return;
+  }
+  const action = doorActions(door)[0];
+  const moving = action === 'parar';
+  stop.hidden = !moving;
+  hold.hidden = moving;
+  if (moving) {
+    const left = Math.max(0, Math.ceil(door.moving_until - serverNow()));
+    if (!gate.busy) $('#gate-status').textContent = `${door.name} em movimento (${left} s). Toque em Parar se precisar.`;
+    return;
+  }
+  if (gate.busy || hold.classList.contains('done') || hold.classList.contains('failed')) return;
+  const waiting = needsVideo(door, action) && (!door.camera ? 'nocam' : !videoPlaying() ? 'wait' : null);
+  hold.disabled = !!waiting || portaria().online === false;
+  $('#gate-hold-label').textContent = waiting === 'nocam' ? 'Sem câmera' : `Segure para ${ACTION_LABEL[action] ?? action}`;
+  $('#gate-status').textContent =
+    portaria().online === false ? '' :
+    waiting === 'nocam' ? 'Para fechar pelo app, defina a câmera desta garagem (ZOIO_GARAGE_CAMERAS).' :
+    waiting === 'wait' ? 'Esperando o vídeo da garagem para liberar o botão.' :
+    action === 'acionar' ? (door.unsure ? 'Depois de parar, o próximo toque pode abrir ou fechar, conforme a central do motor.' : 'Sem leitura do sensor: o mesmo toque abre, para ou fecha.') :
+    'Mantenha o botão apertado até completar o círculo.';
 }
 
 function resetHold(label, status) {
@@ -445,11 +575,11 @@ function resetHold(label, status) {
   btn.classList.remove('done', 'failed');
   btn.style.setProperty('--p', 0);
   btn.disabled = false;
-  $('#gate-hold-label').textContent = label;
+  if (label !== undefined) $('#gate-hold-label').textContent = label;
   if (status !== undefined) $('#gate-status').textContent = status;
 }
 
-// Segurar evita abrir o portão com um toque sem querer (no bolso, por exemplo).
+// Segurar evita abrir com um toque sem querer (no bolso, por exemplo).
 function bindHold(btn, action) {
   let start = 0;
   let raf = 0;
@@ -479,35 +609,68 @@ function bindHold(btn, action) {
   btn.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
-async function doOpenGate() {
-  const btn = $('#gate-hold');
+const DONE_TEXT = { Aberto: 'aberto', Abrindo: 'abrindo', Fechando: 'fechando', Parado: 'parado', Acionado: 'acionado' };
+
+async function doGateAction(action) {
+  const door = currentDoor();
+  if (!door || gate.busy) return;
+  action ??= doorActions(door)[0];
+  if (needsVideo(door, action) && !videoPlaying()) return renderGateControls();
+  const btn = action === 'parar' ? $('#gate-stop') : $('#gate-hold');
+  gate.busy = true;
   btn.disabled = true;
-  $('#gate-hold-label').textContent = 'Abrindo…';
+  if (action !== 'parar') $('#gate-hold-label').textContent = 'Enviando…';
   $('#gate-status').textContent = '';
   let res;
   try {
     const rec = await device.identity();
-    res = await device.openGate(rec);
+    res = await device.portaria(rec, door.id, action, await takeNonce());
     if (res.status === 401 && res.data?.error === 'aparelho_nao_autorizado') { // sessão vencida
       await ensureSession();
-      res = await device.openGate(rec);
+      res = await device.portaria(rec, door.id, action);
     }
   } catch (err) {
     res = { status: 0, data: { error: err.message } };
   }
+  gate.busy = false;
+  btn.disabled = false;
+  const at = (ts) => new Date(ts * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   if (res.status === 200) {
-    btn.classList.add('done');
-    $('#gate-hold-label').textContent = 'Aberto';
-    const at = new Date(res.data.received_at * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    $('#gate-status').textContent = `Portão aberto às ${at}.`;
     navigator.vibrate?.(80);
-    setTimeout(() => { if (!$('#gate').hidden) resetHold('Segure para abrir'); }, 6000);
-  } else {
-    btn.classList.add('failed');
-    $('#gate-hold-label').textContent = 'Não abriu';
-    $('#gate-status').textContent = `Não consegui abrir: ${res.data?.detail?.error ?? res.data?.error ?? `erro ${res.status}`}`;
-    setTimeout(() => { if (!$('#gate').hidden) resetHold('Tentar de novo'); }, 3000);
+    $('#gate-status').textContent = `${door.name}: ${DONE_TEXT[res.data.status] ?? res.data.status} às ${at(res.data.received_at)}.`;
+    if (door.kind === 'portao') {
+      btn.classList.add('done');
+      $('#gate-hold-label').textContent = 'Aberto';
+      setTimeout(() => { if (!$('#gate').hidden) { resetHold(); renderGateControls(); } }, 6000);
+    }
+    return;
   }
+  const reason = res.data?.detail?.error ?? res.data?.error ?? `erro ${res.status}`;
+  if (action === 'parar') {
+    $('#gate-status').textContent = `Não consegui parar: ${reason}`;
+    return;
+  }
+  btn.classList.add('failed');
+  $('#gate-hold-label').textContent = 'Não foi';
+  $('#gate-status').textContent = `Não consegui ${ACTION_LABEL[action] ?? action}: ${reason}`;
+  setTimeout(() => { if (!$('#gate').hidden) { resetHold(); renderGateControls(); } }, 3000);
+}
+
+function portariaUpdate(ev) {
+  const p = portaria();
+  p.online = ev.online;
+  p.doors = ev.doors;
+  if (!$('#gate').hidden) renderGateSheet(false);
+}
+
+function ringed(ev) {
+  const p = portaria();
+  if (!(p.enabled && p.allowed)) return;
+  const at = new Date(ev.received_at * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  openGateSheet('portao');
+  $('#gate-ring').textContent = `Tocaram a campainha às ${at}.`;
+  $('#gate-ring').hidden = false;
+  navigator.vibrate?.([300, 150, 300]);
 }
 
 // ------------------------------------------------------------------ ajustes
@@ -518,6 +681,7 @@ function hevcSupport() {
 }
 
 const kv = (k, v) => el('li', {}, el('span', {}, k), el('span', {}, v));
+const wifiQuality = (dbm) => dbm >= -65 ? 'bom' : dbm >= -75 ? 'fraco: o áudio pode picotar' : 'ruim: precisa de repetidor';
 const when = (ts) => ts ? new Date(ts * 1000).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
 
 function setSettingsBadge(n) {
@@ -559,20 +723,22 @@ function deviceItem(d) {
   if (d.status === 'pending') actions.push(el('button', { class: 'ghost', onclick: () => act('revoke', `Recusar o pedido de "${d.name}"?`) }, 'Recusar'));
   if (d.status === 'approved' && !d.current) actions.push(el('button', { class: 'ghost', onclick: () => act('revoke', `Revogar "${d.name}"? Ele perde o acesso na hora.`) }, 'Revogar'));
   if (d.status === 'revoked') actions.push(el('button', { class: 'ghost', onclick: () => act('delete', `Excluir "${d.name}"? Ele poderá pedir acesso de novo.`) }, 'Excluir'));
-  const gateOn = state.config.gate?.enabled;
+  const gateOn = portaria().enabled;
   if (gateOn && d.status === 'approved') {
-    actions.push(el('button', { class: 'ghost', onclick: () => setGatePermission(d, !d.gate) }, d.gate ? 'Bloquear portão' : 'Liberar portão'));
+    actions.push(el('button', { class: 'ghost', onclick: () => setGatePermission(d, !d.gate) }, d.gate ? 'Bloquear portaria' : 'Liberar portaria'));
   }
   return el('li', {},
     el('div', { class: 'main' },
       el('div', {}, d.name, d.current ? ' (este aparelho) ' : ' ', el('span', { class: `tag ${cls}` }, label),
-        gateOn && d.status === 'approved' && d.gate ? el('span', { class: 'tag gate' }, 'portão') : null),
+        gateOn && d.status === 'approved' && d.gate ? el('span', { class: 'tag gate' }, 'portaria') : null),
       el('div', { class: 'sub' }, details)),
     el('div', { class: 'dev-actions' }, ...actions));
 }
 
 async function setGatePermission(d, allow) {
-  const question = allow ? `Deixar "${d.name}" abrir o portão?` : `Tirar de "${d.name}" a permissão de abrir o portão?`;
+  const question = allow
+    ? `Deixar "${d.name}" usar a portaria? Ele poderá abrir o portão, mexer nas garagens e receber a campainha.`
+    : `Tirar de "${d.name}" a permissão de portaria?`;
   if (!confirm(question)) return;
   try {
     await api(`/api/devices/${d.id}/gate`, { method: 'POST', body: { allow } });
@@ -591,7 +757,7 @@ function approveForm() {
   const code = el('input', { type: 'text', placeholder: 'ABCD-EFGH', maxlength: 9, autocomplete: 'off', 'aria-label': 'Código do aparelho novo' });
   const admin = el('input', { type: 'checkbox' });
   const gate = el('input', { type: 'checkbox' });
-  const gateOn = state.config.gate?.enabled;
+  const gateOn = portaria().enabled;
   const submit = async (e) => {
     e.preventDefault();
     const body = { code: code.value, admin: admin.checked };
@@ -611,7 +777,7 @@ function approveForm() {
       el('div', { class: 'sub' }, 'Digite o código que aparece na tela dele.'),
       el('div', { class: 'dev-approve' }, code, el('button', { type: 'submit' }, 'Aprovar')),
       el('label', { class: 'check' }, admin, 'pode aprovar outros aparelhos'),
-      gateOn ? el('label', { class: 'check' }, gate, 'pode abrir o portão') : null));
+      gateOn ? el('label', { class: 'check' }, gate, 'pode usar a portaria (portão, garagens e campainha)') : null));
 }
 
 async function refreshDevices() {
@@ -634,7 +800,7 @@ async function renderSettings() {
   const me = state.me?.device;
   $('#device-info').replaceChildren(
     ...(me ? [kv('Nome', me.name), kv('Código', me.code), kv('Permissão', me.admin ? 'administrador' : 'comum')] : []),
-    ...(me && state.config.gate?.enabled ? [kv('Portão', me.gate ? 'pode abrir' : 'sem permissão')] : []),
+    ...(me && portaria().enabled ? [kv('Portaria', me.gate ? 'pode usar' : 'sem permissão')] : []),
     kv('Vídeo H.265 ao vivo', hevcSupport() ? 'suportado' : 'não suportado (peça H.264 no fluxo secundário do DVR)'),
     kv('Usuário Tailscale', state.config.user ?? '—'));
   $('#device-rename').hidden = !me;
@@ -661,9 +827,10 @@ async function renderSettings() {
       kv('Ao vivo (go2rtc)', s.live ? 'ok' : 'parado'),
       kv('Alertas do DVR', s.alerts ? 'conectado' : (s.alerts_error ?? 'desconectado')),
       kv('Último alerta', s.last_event_at ? new Date(s.last_event_at * 1000).toLocaleString('pt-BR') : '—'),
-      kv('Portão', s.gate ? 'configurado' : (s.gate_error ?? 'não configurado')),
+      kv('Porteiro', s.portaria ? (s.portaria_online ? 'conectado' : `desconectado: ${s.portaria_error ?? 'sem resposta'}`) : (s.portaria_error ?? 'não configurado')),
+      ...(s.portaria_online && s.portaria_wifi != null ? [kv('Wi-Fi do porteiro', `${s.portaria_wifi} dBm (${wifiQuality(s.portaria_wifi)})`)] : []),
       kv('Versão', state.config.version));
-    $('#gate-test').hidden = !(s.gate && me?.admin);
+    $('#gate-test').hidden = !(s.portaria && me?.admin);
   } catch (err) {
     $('#server-info').replaceChildren(kv('Servidor', `erro: ${err.message}`));
   }
@@ -673,6 +840,7 @@ async function updateStatus() {
   const dot = $('#status');
   try {
     const s = await api('/api/status');
+    if (s.time) state.clockSkew = s.time - Date.now() / 1000;
     dot.className = `status ${s.live && s.alerts ? 'ok' : s.live ? 'warn' : 'bad'}`;
     dot.title = s.live ? (s.alerts ? 'Tudo ok' : `Alertas: ${s.alerts_error}`) : 'Ao vivo parado';
   } catch {
@@ -689,6 +857,7 @@ function route() {
   const params = new URLSearchParams(query);
   let view = { 'ao-vivo': 'live', gravacoes: 'recordings', alertas: 'alerts', ajustes: 'settings' }[path] ?? 'live';
   if (path.startsWith('camera/')) view = 'single';
+  if (path === 'portaria') openGateSheet(params.get('porta') || 'portao');
 
   // Sair da tela cheia desliga o fluxo principal (o mais pesado).
   if (currentView === 'single' && view !== 'single') $('#single-video').replaceChildren();
@@ -721,10 +890,11 @@ async function init() {
   $('#rec-form').addEventListener('submit', (e) => { e.preventDefault(); searchRecordings(); });
   $('#alert-more').onclick = () => loadAlerts(true);
   setupGate();
-  $('#gate-btn').onclick = openGateSheet;
+  $('#gate-btn').onclick = () => openGateSheet();
   $('#gate-close').onclick = closeGateSheet;
   $('#gate').addEventListener('click', (e) => { if (e.target.id === 'gate') closeGateSheet(); });
-  bindHold($('#gate-hold'), doOpenGate);
+  bindHold($('#gate-hold'), () => doGateAction());
+  $('#gate-stop').onclick = () => doGateAction('parar'); // parar é um toque só, sem segurar
   $('#lightbox').onclick = () => { $('#lightbox').hidden = true; };
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
@@ -733,10 +903,11 @@ async function init() {
   });
   $('#gate-test').onclick = async () => {
     try {
-      const r = await api('/api/gate/check', { method: 'POST', body: {} });
-      toast(r.button_ok ? `Placa ${r.name} respondeu. Tudo certo.` : `Placa ${r.name} respondeu, mas sem o botão esperado (achei: ${r.buttons.join(', ') || 'nenhum'}).`, 6000);
+      const r = await api('/api/portaria/check', { method: 'POST', body: {} });
+      const doors = r.doors.map((d) => d.kind === 'garagem' && !d.sensor ? `${d.name} (sem sensor)` : d.name);
+      toast(`Placa ${r.name} respondeu: ${doors.join(', ') || 'nenhuma porta'}${r.doorbell ? ', campainha' : ''}.`, 6000);
     } catch (err) {
-      toast(`Placa do portão: ${err.message}`, 6000);
+      toast(`Placa do porteiro: ${err.message}`, 6000);
     }
   };
   $('#push-on').onclick = enablePush;

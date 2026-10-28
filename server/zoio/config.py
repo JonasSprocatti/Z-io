@@ -76,19 +76,27 @@ class Config:
     notify_cooldown: int = 300
     cache_max_mb: int = 2048
     push_contact: str = "mailto:zoio@localhost"
-    # Portão: placa ESPHome com relé (vazio = sem portão)
+    # Porteiro: placa ESPHome do portão (vazio = sem portaria)
     gate_host: str | None = None
     gate_port: int = 6053
     gate_key: str | None = None
-    gate_name: str = "zoio-portao"
-    gate_button: str = "abrir_portao"
+    gate_name: str = "zoio-porteiro"
     gate_camera: int | None = None
-    gate_error: str | None = None  # configuração do portão com problema
+    garage_cameras: list[int | None] = field(default_factory=list)  # na ordem das garagens
+    garage_names: list[str] = field(default_factory=list)
+    garage_travel: int = 30  # segundos que o motor leva para abrir ou fechar
+    gate_error: str | None = None  # configuração do porteiro com problema
 
     @property
     def gate_enabled(self) -> bool:
-        """O portão só funciona com a aprovação de aparelhos ligada."""
+        """A portaria só funciona com a aprovação de aparelhos ligada."""
         return bool(self.gate_host and self.gate_key and self.device_approval)
+
+    def garage_name(self, n: int) -> str:
+        return self.garage_names[n - 1] if n - 1 < len(self.garage_names) and self.garage_names[n - 1] else f"Garagem {n}"
+
+    def garage_camera(self, n: int) -> int | None:
+        return self.garage_cameras[n - 1] if n - 1 < len(self.garage_cameras) else None
 
     @property
     def rtsp_base(self) -> str:
@@ -135,7 +143,13 @@ def load(env_file: str | None = None) -> Config:
             decode_key(gate_key)
         except EspHomeError as exc:
             gate_key, gate_error = None, f"ZOIO_GATE_KEY: {exc}"
-    gate_camera = int(env["ZOIO_GATE_CAMERA"]) if env.get("ZOIO_GATE_CAMERA", "").strip() else None
+    numbers = {c.number for c in cameras}
+
+    def camera_ref(raw: str) -> int | None:  # câmera que não existe é ignorada
+        raw = raw.strip()
+        return int(raw) if raw.isdigit() and int(raw) in numbers else None
+
+    garage_cameras = [camera_ref(x) for x in env["ZOIO_GARAGE_CAMERAS"].split(",")] if env.get("ZOIO_GARAGE_CAMERAS", "").strip() else []
     return Config(
         dvr_host=env["DVR_HOST"],
         dvr_user=env["DVR_USER"],
@@ -158,8 +172,10 @@ def load(env_file: str | None = None) -> Config:
         gate_host=env.get("ZOIO_GATE_HOST") or None,
         gate_port=int(env.get("ZOIO_GATE_PORT", "6053")),
         gate_key=gate_key,
-        gate_name=env.get("ZOIO_GATE_NAME", "zoio-portao"),
-        gate_button=env.get("ZOIO_GATE_BUTTON", "abrir_portao"),
-        gate_camera=gate_camera if gate_camera and any(c.number == gate_camera for c in cameras) else None,
+        gate_name=env.get("ZOIO_GATE_NAME", "zoio-porteiro"),
+        gate_camera=camera_ref(env.get("ZOIO_GATE_CAMERA", "")),
+        garage_cameras=garage_cameras,
+        garage_names=[n.strip() for n in env.get("ZOIO_GARAGE_NAMES", "").split(",")] if env.get("ZOIO_GARAGE_NAMES", "").strip() else [],
+        garage_travel=int(env.get("ZOIO_GARAGE_TRAVEL", "30")),
         gate_error=gate_error,
     )

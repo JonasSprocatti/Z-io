@@ -134,15 +134,27 @@ class Notifier:
                 sent += 1
         return sent
 
-    async def gate_opened(self, by: str, device_id: str | None) -> int:
-        """Avisa os outros administradores que o portão foi aberto."""
+    async def door_action(self, door: str, status: str, by: str, device_id: str | None) -> int:
+        """Avisa os outros administradores que alguém mexeu no portão ou numa garagem."""
         payload = json.dumps(
-            {"title": "Portão aberto", "body": f"por {by}", "tag": "portao", "url": "/#alertas"},
+            {"title": f"{door}: {status.lower()}", "body": f"por {by}", "tag": "portaria", "url": "/#alertas"},
             ensure_ascii=False,
         ).encode()
         sent = 0
         for item in self.store.subscriptions(admins_only=True):
             if item["device_id"] != device_id and await self.send(item["sub"], payload):
+                sent += 1
+        return sent
+
+    async def doorbell(self) -> int:
+        """Campainha: avisa todos os aparelhos que podem atender (permissão de portaria)."""
+        payload = json.dumps(
+            {"title": "Campainha", "body": f"Tocaram no portão às {time.strftime('%H:%M')}", "tag": "campainha", "url": "/#portaria", "urgent": True},
+            ensure_ascii=False,
+        ).encode()
+        sent = 0
+        for item in self.store.subscriptions(gate_only=True):
+            if await self.send(item["sub"], payload):
                 sent += 1
         return sent
 

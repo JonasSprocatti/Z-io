@@ -14,30 +14,55 @@ from noise.connection import NoiseConnection
 
 from zoio import esphome as eh
 
+PORTEIRO_BUTTONS = {"abrir_portao": (0x1234ABCD, "Abrir portao"), "garagem_1": (0x2001, "Garagem 1"), "garagem_2": (0x2002, "Garagem 2")}
+PORTEIRO_SENSORS = {"campainha": (0x3000, "Campainha"), "garagem_1_aberta": (0x3001, "Garagem 1 aberta")}
+
 
 class FakeEspHome:
-    def __init__(self, key: str, name: str = "zoio-portao", buttons: dict | None = None, encrypted: bool = True):
+    def __init__(self, key: str, name: str = "zoio-porteiro", buttons: dict | None = None, sensors: dict | None = None, encrypted: bool = True):
         self.psk = eh.decode_key(key)
         self.name = name
-        self.buttons = buttons if buttons is not None else {"abrir_portao": (0x1234ABCD, "Abrir portao")}
+        self.buttons = dict(PORTEIRO_BUTTONS if buttons is None else buttons)
+        self.sensors = dict(PORTEIRO_SENSORS if sensors is None else sensors)
+        self.states = {obj: False for obj in self.sensors}
         self.encrypted = encrypted
         self.pressed: list[int] = []
         self.hello: dict | None = None
         self.pongs = 0
         self.disconnects = 0
+        self.connections = 0
+        self.silent = False  # para de responder (simula a placa travada)
+        self.wifi_dbm = -61.0
+        self._subscribers: list = []
+        self._writers: set[asyncio.StreamWriter] = set()
         self.server: asyncio.Server | None = None
         self.port = 0
 
-    async def start(self) -> "FakeEspHome":
-        self.server = await asyncio.start_server(self._client, "127.0.0.1", 0)
+    async def start(self, port: int = 0) -> "FakeEspHome":
+        self.server = await asyncio.start_server(self._client, "127.0.0.1", port or self.port)
         self.port = self.server.sockets[0].getsockname()[1]
         return self
 
     async def stop(self) -> None:
         self.server.close()
+        for w in list(self._writers):  # derruba quem estiver conectado
+            w.close()
         await self.server.wait_closed()
 
+    def press_key(self, key: int) -> str | None:
+        return next((obj for obj, (k, _) in self.buttons.items() if k == key), None)
+
+    async def set_state(self, object_id: str, state: bool) -> None:
+        """Muda um sensor (campainha apertada, garagem abriu) e avisa quem assina."""
+        self.states[object_id] = state
+        for send in list(self._subscribers):
+            send(object_id, state)
+        await asyncio.sleep(0.05)
+
     async def _client(self, r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+        self._writers.add(w)
+        self.connections += 1
+
         async def frame() -> bytes:
             head = await r.readexactly(3)
             assert head[0] == 0x01, head
@@ -46,6 +71,7 @@ class FakeEspHome:
         def send(payload: bytes) -> None:
             w.write(b"\x01" + struct.pack(">H", len(payload)) + payload)
 
+        subscriber = None
         try:
             if not self.encrypted:
                 await r.read(3)
@@ -73,18 +99,33 @@ class FakeEspHome:
             def send_msg(msg_type: int, data: bytes = b"") -> None:
                 send(noise.encrypt(struct.pack(">HH", msg_type, len(data)) + data))
 
+            def send_state(object_id: str, state: bool) -> None:
+                key = self.sensors[object_id][0]
+                send_msg(eh.BINARY_SENSOR_STATE, eh.pb_fixed32(1, key) + eh.pb_uint(2, int(state)))
+
             while True:
                 plain = noise.decrypt(await frame())
+                if self.silent:
+                    continue
                 msg_type, data = struct.unpack(">H", plain[:2])[0], plain[4:]
                 if msg_type == eh.HELLO_REQUEST:
                     self.hello = eh.pb_parse(data)
                     send_msg(eh.HELLO_RESPONSE, eh.pb_uint(1, 1) + eh.pb_uint(2, 10) + eh.pb_string(3, "fake 2026.10") + eh.pb_string(4, self.name))
                     send_msg(eh.PING_REQUEST)  # a placa real manda ping de tempos em tempos
                 elif msg_type == eh.LIST_ENTITIES_REQUEST:
-                    send_msg(16, eh.pb_string(1, "sinal_wifi") + eh.pb_fixed32(2, 7))  # um sensor qualquer
+                    send_msg(eh.LIST_ENTITIES_SENSOR, eh.pb_string(1, "sinal_wifi") + eh.pb_fixed32(2, 7) + eh.pb_string(3, "Sinal Wi-Fi"))
+                    for object_id, (key, name) in self.sensors.items():
+                        send_msg(eh.LIST_ENTITIES_BINARY_SENSOR, eh.pb_string(1, object_id) + eh.pb_fixed32(2, key) + eh.pb_string(3, name))
                     for object_id, (key, name) in self.buttons.items():
                         send_msg(eh.LIST_ENTITIES_BUTTON, eh.pb_string(1, object_id) + eh.pb_fixed32(2, key) + eh.pb_string(3, name))
                     send_msg(eh.LIST_ENTITIES_DONE)
+                elif msg_type == eh.SUBSCRIBE_STATES:
+                    for object_id, state in self.states.items():
+                        send_state(object_id, state)
+                    send_msg(eh.BINARY_SENSOR_STATE, eh.pb_fixed32(1, 0x9999) + eh.pb_uint(3, 1))  # sensor sem leitura
+                    send_msg(eh.SENSOR_STATE, eh.pb_fixed32(1, 7) + eh.pb_float(2, self.wifi_dbm))
+                    subscriber = send_state
+                    self._subscribers.append(subscriber)
                 elif msg_type == eh.BUTTON_COMMAND:
                     self.pressed.append(eh.pb_parse(data)[1])
                 elif msg_type == eh.PING_REQUEST:
@@ -100,4 +141,7 @@ class FakeEspHome:
         except (asyncio.IncompleteReadError, ConnectionError):
             pass
         finally:
+            if subscriber in self._subscribers:
+                self._subscribers.remove(subscriber)
+            self._writers.discard(w)
             w.close()

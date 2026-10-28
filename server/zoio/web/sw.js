@@ -1,5 +1,5 @@
-// Service worker do Zóio: notificações de movimento e abertura rápida do app.
-const CACHE = 'zoio-v3';
+// Service worker do Zóio: notificações (movimento, campainha) e abertura rápida do app.
+const CACHE = 'zoio-v4';
 const SHELL = ['/', '/web/app.js', '/web/device.js', '/web/app.css', '/web/icons/icon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {
@@ -29,6 +29,8 @@ self.addEventListener('push', (event) => {
     body: data.body,
     tag: data.tag,
     renotify: true,
+    requireInteraction: !!data.urgent, // campainha fica na tela até alguém ver
+    vibrate: data.urgent ? [300, 150, 300, 150, 600] : undefined,
     icon: '/web/icons/icon-192.png',
     badge: '/web/icons/icon-192.png',
     data: { url: data.url || (data.camera ? `/#camera/${data.camera}` : '/#alertas') },

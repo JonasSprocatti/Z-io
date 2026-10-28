@@ -1,0 +1,33 @@
+name: firmware
+
+# Compila o firmware das placas ESPHome com segredos de mentira. Os de verdade
+# (Wi-Fi e chave da API) só existem no Pi.
+on:
+  push:
+    branches: [main]
+    paths: ["deploy/esphome/**", ".github/workflows/firmware.yml"]
+  pull_request:
+    paths: ["deploy/esphome/**", ".github/workflows/firmware.yml"]
+
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            deploy/esphome/.esphome
+          key: esphome-2026.10.1-${{ hashFiles('deploy/esphome/*.yaml') }}
+          restore-keys: esphome-2026.10.1-
+      - run: pip install esphome==2026.10.1
+      - name: Segredos de mentira
+        working-directory: deploy/esphome
+        run: |
+          printf 'wifi_ssid: "teste"\nwifi_password: "senha-de-teste"\napi_key: "%s"\n' "$(openssl rand -base64 32)" > secrets.yaml
+      - run: esphome compile porteiro.yaml
+        working-directory: deploy/esphome
