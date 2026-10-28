@@ -1,0 +1,21 @@
+# Sensor magnético com fio em cada garagem (o outro fio no GND).
+#
+#   GPIO13 ← garagem 1
+#   GPIO14 ← garagem 2
+#
+# Com o ímã encostado (garagem fechada) o contato fecha e o pino vai para o
+# GND. Se o seu sensor fizer o contrário, mude sensor_invertido para "true".
+
+binary_sensor:
+  - platform: gpio
+    name: "Garagem 1 aberta"  # vira garagem_1_aberta
+    device_class: garage_door
+    pin: { number: GPIO13, mode: { input: true, pullup: true }, inverted: "${sensor_invertido}" }
+    filters:
+      - delayed_on_off: 300ms
+  - platform: gpio
+    name: "Garagem 2 aberta"
+    device_class: garage_door
+    pin: { number: GPIO14, mode: { input: true, pullup: true }, inverted: "${sensor_invertido}" }
+    filters:
+      - delayed_on_off: 300ms

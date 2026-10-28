@@ -1,0 +1,43 @@
+# Garagens pelos relés 2 e 3 do módulo.
+#
+# Serve para os dois casos com fio:
+# - COM e NA de cada relé na botoeira da central do motor (BOT e GND/COM);
+# - COM e NA de cada relé soldados nos dois lados do botão de um controle
+#   extra, cadastrado na central (para controles rolling code).
+#
+#   GPIO11 → IN2: garagem 1
+#   GPIO12 → IN3: garagem 2
+
+output:
+  - platform: gpio
+    id: rele_garagem_1
+    pin: { number: GPIO11, inverted: "${rele_invertido}" }
+  - platform: gpio
+    id: rele_garagem_2
+    pin: { number: GPIO12, inverted: "${rele_invertido}" }
+
+script:
+  - id: pulso_garagem_1
+    mode: single  # apertos repetidos durante o pulso são ignorados
+    then:
+      - output.turn_on: rele_garagem_1
+      - delay: ${pulso_garagem}
+      - output.turn_off: rele_garagem_1
+  - id: pulso_garagem_2
+    mode: single
+    then:
+      - output.turn_on: rele_garagem_2
+      - delay: ${pulso_garagem}
+      - output.turn_off: rele_garagem_2
+
+button:
+  - platform: template
+    name: "Garagem 1"  # vira garagem_1
+    icon: mdi:garage
+    on_press:
+      - script.execute: pulso_garagem_1
+  - platform: template
+    name: "Garagem 2"
+    icon: mdi:garage
+    on_press:
+      - script.execute: pulso_garagem_2

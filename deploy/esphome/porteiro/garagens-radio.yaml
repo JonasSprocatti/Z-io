@@ -1,0 +1,47 @@
+# Garagens pelo rádio 433 MHz, com o código do controle de vocês.
+#
+# Só para controle de código fixo (HT6P20, EV1527...). Controle rolling code
+# muda o código a cada clique: aí use garagens-rele.yaml com um controle extra.
+#
+#   GPIO9 → DATA do transmissor STX882 (VCC no 5V, antena de 17,3 cm)
+#
+# Os códigos vêm do `zoio portao radio`, com a placa ligada e o receptor no
+# GPIO8: aperte cada botão do controle perto dela. Vão no secrets.yaml:
+#   radio_protocolo: "6"
+#   radio_garagem_1: "0110..."   (zeros e uns, como o Zóio mostrar)
+#   radio_garagem_2: "0110..."
+
+remote_transmitter:
+  id: radio_tx
+  pin: GPIO9
+  carrier_duty_percent: 100%
+
+script:
+  - id: radio_garagem_1
+    mode: single  # apertos repetidos durante a transmissão são ignorados
+    then:
+      - remote_transmitter.transmit_rc_switch_raw:
+          transmitter_id: radio_tx
+          code: !secret radio_garagem_1
+          protocol: !secret radio_protocolo
+          repeat: { times: 10, wait_time: 0s }
+  - id: radio_garagem_2
+    mode: single
+    then:
+      - remote_transmitter.transmit_rc_switch_raw:
+          transmitter_id: radio_tx
+          code: !secret radio_garagem_2
+          protocol: !secret radio_protocolo
+          repeat: { times: 10, wait_time: 0s }
+
+button:
+  - platform: template
+    name: "Garagem 1"  # vira garagem_1
+    icon: mdi:garage
+    on_press:
+      - script.execute: radio_garagem_1
+  - platform: template
+    name: "Garagem 2"
+    icon: mdi:garage
+    on_press:
+      - script.execute: radio_garagem_2

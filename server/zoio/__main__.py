@@ -160,8 +160,8 @@ def manage_devices(cfg: config.Config, action: str | None, ref: str | None, comm
         store.close()
 
 
-def manage_porteiro(cfg: config.Config, action: str, door: str | None) -> int:
-    """Testa a placa do porteiro, abre o portão ou aciona uma garagem pelo Pi."""
+def manage_porteiro(cfg: config.Config, action: str, door: str | None, seconds: float = 60) -> int:
+    """Testa a placa do porteiro, abre o portão, aciona uma garagem ou escuta o rádio pelo Pi."""
     if cfg.gate_error:
         print(f"Erro na configuração: {cfg.gate_error}", file=sys.stderr)
         return 1
@@ -169,10 +169,29 @@ def manage_porteiro(cfg: config.Config, action: str, door: str | None) -> int:
         print("Portaria não configurada: defina ZOIO_GATE_HOST e ZOIO_GATE_KEY no /etc/zoio/zoio.env.", file=sys.stderr)
         return 1
 
+    async def radio(porteiro: Porteiro) -> int:
+        print(f"Escutando o rádio da placa por {seconds:.0f} s. Aperte cada botão do controle perto dela,")
+        print("um de cada vez, e abra e feche cada garagem que tiver sensor sem fio.", flush=True)
+        codes: list[tuple[int, str]] = []
+
+        def on_code(protocol: int, code: str) -> None:
+            codes.append((protocol, code))
+            print(f"  {len(codes)}. protocolo {protocol}, código {code} ({len(code)} bits)", flush=True)
+
+        await porteiro.radio(seconds, on_code)
+        if not codes:
+            print("Nenhum código chegou. Confira o receptor (DATA no GPIO8, VCC no 3V3) e a antena.", file=sys.stderr)
+            return 1
+        print("Anote qual botão ou sensor gerou cada código e ponha no secrets.yaml da placa")
+        print("(radio_protocolo, radio_garagem_N, sensor_protocolo, sensor_garagem_N_abriu/_fechou).")
+        return 0
+
     async def run() -> int:
         store = Store(cfg.data_dir / "zoio.db")
         porteiro = Porteiro(cfg, store, EventBus())
         try:
+            if action == "radio":
+                return await radio(porteiro)
             async with porteiro.session():
                 info = porteiro.info
                 if action == "testar":
@@ -223,9 +242,10 @@ def main() -> None:
     d.add_argument("codigo", nargs="?", help="código mostrado no aparelho (ex.: ABCD-EFGH) ou id")
     d.add_argument("--comum", action="store_true", help="aprova sem permissão de aprovar outros aparelhos nem de usar a portaria")
     d.add_argument("--nao", action="store_true", help="com 'portao': tira a permissão de portaria")
-    pt = sub.add_parser("portao", help="placa do porteiro: gerar chave, testar, abrir o portão ou acionar uma garagem")
-    pt.add_argument("acao", choices=["chave", "testar", "abrir", "acionar"])
+    pt = sub.add_parser("portao", help="placa do porteiro: gerar chave, testar, abrir o portão, acionar uma garagem ou escutar o rádio")
+    pt.add_argument("acao", choices=["chave", "testar", "abrir", "acionar", "radio"])
     pt.add_argument("porta", nargs="?", help="com 'acionar': garagem_1, garagem_2...")
+    pt.add_argument("--segundos", type=float, default=60, help="com 'radio': quanto tempo escutar (padrão 60)")
     args = parser.parse_args()
 
     if args.cmd == "portao" and args.acao == "chave":  # não precisa da configuração
@@ -246,7 +266,7 @@ def main() -> None:
     elif args.cmd == "aparelhos":
         sys.exit(manage_devices(cfg, args.acao, args.codigo, args.comum, args.nao))
     elif args.cmd == "portao":
-        sys.exit(manage_porteiro(cfg, args.acao, args.porta))
+        sys.exit(manage_porteiro(cfg, args.acao, args.porta, args.segundos))
 
 
 if __name__ == "__main__":

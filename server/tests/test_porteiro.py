@@ -11,11 +11,18 @@ from test_devices import Phone, pair_admin
 
 from zoio import devices as dev
 from zoio import esphome, porteiro
+from zoio.alarms import EventBus
 from zoio.app import create_app
 from zoio.store import Store
 
 KEY = esphome.new_key()
 JPEG = b"\xff\xd8\xff\xe0foto-do-portao\xff\xd9"
+RADIO_LOG = [
+    "\x1b[0;32m[I][remote.rc_switch:256]: Received RCSwitch Raw: protocol=6 data='0110100101101001'\x1b[0m",
+    "[I][remote.rc_switch:256]: Received RCSwitch Raw: protocol=6 data='0110100101101001'",  # o controle repete o código
+    "[I][wifi:512]: outra coisa qualquer",
+    "[I][remote.rc_switch:256]: Received RCSwitch Raw: protocol=1 data='101010101010101010101110'",
+]
 
 
 async def until(check, timeout=3.0):
@@ -266,6 +273,19 @@ async def test_portaria_off_without_config(aiohttp_client, make_cfg):
     assert (await client.post("/api/portaria/challenge", headers=admin.h)).status == 404
 
 
+async def test_radio_lists_each_code_once(make_cfg, board):
+    board.logs = RADIO_LOG
+    cfg = make_cfg(1, gate_host="127.0.0.1", gate_port=board.port, gate_key=KEY)
+    cfg.data_dir.mkdir(parents=True)
+    store = Store(cfg.data_dir / "zoio.db")
+    codes = []
+    await porteiro.Porteiro(cfg, store, EventBus()).radio(0.5, lambda p, c: codes.append((p, c)))
+    store.close()
+    assert codes == [(6, "0110100101101001"), (1, "101010101010101010101110")]
+    assert board.log_level == esphome.LOG_LEVEL_INFO
+    assert board.pressed == []  # escutar não aperta nada
+
+
 def test_config(make_cfg, tmp_path):
     assert make_cfg(1, gate_host="x", gate_key=KEY).gate_enabled
     assert not make_cfg(1, gate_host="x", gate_key=KEY, device_approval=False).gate_enabled
@@ -332,6 +352,13 @@ async def test_cli_commands(tmp_path, make_cfg, board):
     code, out, err = await run("portao", "acionar", "garagem_7")
     assert code == 2 and "Porta desconhecida" in err
     assert board.pressed == [0x1234ABCD, 0x2002]
+
+    code, out, err = await run("portao", "radio", "--segundos", "0.5")
+    assert code == 1 and "Nenhum código chegou" in err
+    board.logs = RADIO_LOG
+    code, out, err = await run("portao", "radio", "--segundos", "0.5")
+    assert code == 0, err
+    assert "1. protocolo 6, código 0110100101101001 (16 bits)" in out and "2. protocolo 1" in out and "3." not in out
 
     code, out, err = await run("aparelhos", "portao", device["code"])
     assert code == 0 and "pode usar a portaria" in out, err
