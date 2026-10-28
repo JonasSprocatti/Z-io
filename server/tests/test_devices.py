@@ -267,3 +267,52 @@ def test_cli_approves_by_code(tmp_path, make_cfg):
     assert approved["status"] == "approved" and approved["admin"] == 1 and approved["approved_by"] == "pi"
     out = run("aparelhos", "aprovar", "ZZZZ-ZZZZ")
     assert out.returncode != 0 and "nenhum aparelho" in out.stderr
+
+
+async def test_admin_renames_and_hides_cameras(client, aiohttp_client):
+    admin = await pair_admin(client)
+    common = Phone("Comum")
+    await common.register(client)
+    client.devices.approve(common.id, admin=False, by="pi")
+    await common.login(client)
+
+    # só o administrador mexe nas câmeras
+    assert (await client.post("/api/cameras/3", json={"hidden": True}, headers=common.h)).status == 403
+    assert (await client.post("/api/cameras/9", json={"hidden": True}, headers=admin.h)).status == 404
+    assert (await client.post("/api/cameras/3", json={"hidden": "sim"}, headers=admin.h)).status == 400
+    assert (await client.post("/api/cameras/3", json={"name": "x" * 41}, headers=admin.h)).status == 400
+
+    resp = await client.post("/api/cameras/3", json={"hidden": True}, headers=admin.h)
+    assert resp.status == 200 and (await resp.json())["hidden"] is True
+    resp = await client.post("/api/cameras/1", json={"name": "  Portão   da frente "}, headers=admin.h)
+    assert (await resp.json())["name"] == "Portão da frente"
+
+    # vale para todos os aparelhos; a oculta continua na lista, marcada
+    cams = (await (await client.get("/api/config", headers=common.h)).json())["cameras"]
+    assert [(c["number"], c["name"], c["hidden"]) for c in cams] == [
+        (1, "Portão da frente", False), (2, "Câmera 2", False), (3, "Câmera 3", True), (4, "Câmera 4", False)]
+    assert cams[0]["default_name"] == "Câmera 1"
+
+    # mudar só a visibilidade mantém o nome; nome vazio volta ao do zoio.env
+    await client.post("/api/cameras/1", json={"hidden": True}, headers=admin.h)
+    cam1 = client.app["zoio_cfg"].camera(1)
+    assert (cam1.name, cam1.hidden) == ("Portão da frente", True)
+    await client.post("/api/cameras/1", json={"name": "", "hidden": False}, headers=admin.h)
+    assert (cam1.name, cam1.hidden) == ("Câmera 1", False)
+
+    # alertas de câmera oculta somem da lista e não entram mais
+    client.store.add_event(3, "VideoMotion", "Start", None)
+    client.store.add_event(2, "VideoMotion", "Start", None)
+    events = await (await client.get("/api/events", headers=admin.h)).json()
+    assert [e["camera"] for e in events] == [2]
+    await client.app["zoio_alarms"].handle({"Channel": 2, "Event": "VideoLoss", "Status": "Start"})
+    assert [e["camera"] for e in client.store.events(status=None)] == [2, 3]
+
+    # sobrevive a reiniciar o servidor
+    cfg = client.app["zoio_cfg"]
+    await client.close()
+    for c in cfg.cameras:
+        c.name, c.hidden = c.default_name, False
+    app = create_app(cfg)
+    await aiohttp_client(app)
+    assert [c.number for c in app["zoio_cfg"].cameras if c.hidden] == [3]

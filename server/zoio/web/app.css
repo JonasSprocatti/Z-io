@@ -300,6 +300,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .list li.column { flex-direction: column; align-items: stretch; background: var(--panel-2); border-color: var(--line-2); }
 .list li .head { display: flex; gap: 10px; align-items: center; }
 .list li.column .check { margin-top: 4px; font-size: 14px; }
+.grid-empty { text-align: center; padding: 40px 16px; }
+.cam-item .cam-num { font-variant-numeric: tabular-nums; font-weight: 700; }
+.cam-item form { align-items: center; flex-wrap: nowrap; }
+.cam-item input { flex: 1; min-width: 0; background: var(--bg); }
+.cam-item.off input { color: var(--muted); }
+.cam-item .cam-save[hidden], .cam-item.editing > button { display: none; }
 /* o player do go2rtc mostra o modo (MSE/HLS) no canto; na grade só interessa erro */
 .tile video-stream .mode { display: none; }
 

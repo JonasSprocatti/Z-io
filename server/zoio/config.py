@@ -46,6 +46,11 @@ def _env_value(raw: str) -> str:
 class Camera:
     number: int  # 1..N, como aparece no DVR e na URL RTSP
     name: str
+    hidden: bool = False  # escondida pelo app (canal sem câmera, por exemplo)
+    default_name: str = ""  # nome do zoio.env, que volta quando o nome do app é apagado
+
+    def __post_init__(self):
+        self.default_name = self.default_name or self.name
 
     @property
     def main(self) -> str:
