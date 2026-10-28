@@ -276,7 +276,8 @@ function showPhoto(eventId) {
   box.hidden = false;
 }
 
-const PORTARIA_KINDS = new Set(['Portao', 'Garagem', 'Campainha']);
+const PORTARIA_KINDS = new Set(['Portao', 'Garagem', 'Campainha', 'Conversa']);
+const duration = (s) => `${Math.floor(s / 60)}:${pad(s % 60)}`;
 
 // Portão, garagens e campainha: quem fez, o resultado e a foto daquela hora.
 function portariaItem(ev, when, date) {
@@ -285,12 +286,13 @@ function portariaItem(ev, when, date) {
   let title;
   let who = d.by ? `por ${d.by}` : null;
   if (ev.kind === 'Campainha') title = 'Campainha tocou';
+  else if (ev.kind === 'Conversa') title = failed ? 'Conversa no portão não começou' : `Conversa no portão (${duration(d.seconds ?? 0)})`;
   else if (ev.kind === 'Portao') title = failed ? 'Portão não abriu' : 'Portão aberto';
   else if (ev.status === 'Abriu' || ev.status === 'Fechou') {
     title = `${d.name ?? 'Garagem'} ${ev.status === 'Abriu' ? 'abriu' : 'fechou'}`;
     who = 'pelo controle ou na mão';
   } else title = failed ? `${d.name ?? 'Garagem'}: comando falhou` : `${d.name ?? 'Garagem'}: ${ev.status.toLowerCase()}`;
-  const tag = { Campainha: ['bell', 'campainha'], Portao: ['gate', 'portão'], Garagem: ['gate', 'garagem'] }[ev.kind];
+  const tag = { Campainha: ['bell', 'campainha'], Portao: ['gate', 'portão'], Garagem: ['gate', 'garagem'], Conversa: ['gate', 'conversa'] }[ev.kind];
   return el('li', {},
     d.photo ? el('img', { class: 'thumb', src: `/api/portaria/photos/${ev.id}.jpg`, alt: `Foto: ${title}`, loading: 'lazy', onclick: () => showPhoto(ev.id) }) : null,
     el('div', { class: 'main' },
@@ -485,6 +487,7 @@ async function openGateSheet(door) {
 }
 
 function closeGateSheet() {
+  endTalk();
   $('#gate').hidden = true;
   $('#gate-ring').hidden = true;
   $('#gate-video').replaceChildren(); // desliga o vídeo
@@ -518,6 +521,7 @@ async function renderGateSheet(changedDoor) {
   renderChips();
   const door = currentDoor();
   $('#gate-title').textContent = p.doors.length > 1 ? 'Portaria' : (door?.name ?? 'Portão');
+  renderTalk();
   if (changedDoor) {
     resetHold(undefined, '');
     const cam = state.cameras.find((c) => c.number === door?.camera);
@@ -660,7 +664,134 @@ function portariaUpdate(ev) {
   const p = portaria();
   p.online = ev.online;
   p.doors = ev.doors;
+  p.talk = ev.talk;
+  p.talking = ev.talking;
   if (!$('#gate').hidden) renderGateSheet(false);
+}
+
+// ------------------------------------------------------------------ conversa no portão
+// Estilo rádio: segure para falar, solte para ouvir. O áudio vai pelo Zóio
+// (WebSocket) até a placa do portão, que não tem cancelamento de eco.
+
+const talk = { state: 'idle', ws: null, ctx: null, stream: null, speaker: null, holding: false, started: 0, timer: 0, reason: null, last: '' };
+
+function renderTalk() {
+  const p = portaria();
+  $('#talk').hidden = !p.talk;
+  const mine = talk.state !== 'idle';
+  $('#talk-start').hidden = talk.state === 'live';
+  $('#talk-live').hidden = talk.state !== 'live';
+  $('#talk-start').disabled = mine || !!p.talking || p.online === false;
+  $('#talk-start').textContent = talk.state === 'connecting' ? 'Chamando…' : 'Conversar';
+  if (talk.state === 'live') $('#talk-time').textContent = duration(Math.floor((Date.now() - talk.started) / 1000));
+  else if (!mine) $('#talk-status').textContent = p.talking ? `${p.talking} está conversando no portão.` : talk.last;
+}
+
+function talkStatus(text) {
+  $('#talk-status').textContent = text;
+}
+
+async function startTalk() {
+  if (talk.state !== 'idle') return;
+  talk.state = 'connecting';
+  talk.reason = null;
+  renderTalk();
+  talkStatus('Ligando o microfone…');
+  // O áudio precisa ser criado no toque (iPhone).
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+  talk.ctx = ctx;
+  try {
+    if (!navigator.mediaDevices?.getUserMedia || !ctx.audioWorklet) throw new Error('este navegador não tem o que a conversa precisa');
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    if (talk.ctx !== ctx) { stream.getTracks().forEach((t) => t.stop()); return; } // encerrada no meio
+    talk.stream = stream;
+    await ctx.audioWorklet.addModule('/web/conversa-worklet.js');
+    const mic = new AudioWorkletNode(ctx, 'zoio-microfone');
+    const sink = ctx.createGain();
+    sink.gain.value = 0; // o microfone só precisa ser processado, não tocado
+    ctx.createMediaStreamSource(stream).connect(mic).connect(sink).connect(ctx.destination);
+    mic.port.onmessage = (e) => { if (talk.holding && talk.ws?.readyState === WebSocket.OPEN) talk.ws.send(e.data); };
+    talk.speaker = new AudioWorkletNode(ctx, 'zoio-alto-falante', { outputChannelCount: [1] });
+    talk.speaker.connect(ctx.destination);
+    await ctx.resume();
+
+    talkStatus('Chamando a placa do portão…');
+    const rec = await device.identity();
+    let hello = await device.talkHello(rec);
+    if (!hello) { await ensureSession(); hello = await device.talkHello(rec); }
+    if (!hello) throw new Error('sem permissão de portaria');
+    if (talk.ctx !== ctx) return;
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/portaria/conversa`);
+    ws.binaryType = 'arraybuffer';
+    talk.ws = ws;
+    ws.onopen = () => ws.send(JSON.stringify(hello));
+    ws.onmessage = (e) => {
+      if (typeof e.data !== 'string') { talk.speaker?.port.postMessage(e.data, [e.data]); return; }
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'pronto') {
+        talk.state = 'live';
+        talk.started = Date.now();
+        talk.timer = setInterval(renderTalk, 1000);
+        navigator.vibrate?.(60);
+        talkStatus('Segure o botão para falar e solte para ouvir.');
+        renderTalk();
+      } else if (msg.type === 'fim') {
+        talk.reason = msg.motivo;
+      }
+    };
+    ws.onclose = () => endTalk(talk.reason ?? (talk.state === 'live' ? 'a conexão caiu' : 'não consegui falar com o Zóio'));
+  } catch (err) {
+    endTalk(err.name === 'NotAllowedError'
+      ? 'o microfone foi bloqueado; libere o microfone para o Zóio nas permissões do navegador'
+      : err.message);
+  }
+}
+
+function endTalk(reason) {
+  if (talk.state === 'idle') return;
+  const ws = talk.ws;
+  talk.ws = null;
+  if (ws) {
+    ws.onclose = null;
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'fim' }));
+    ws.close();
+  }
+  talk.stream?.getTracks().forEach((t) => t.stop());
+  talk.ctx?.close().catch(() => {});
+  clearInterval(talk.timer);
+  const wasLive = talk.state === 'live';
+  const seconds = wasLive ? Math.floor((Date.now() - talk.started) / 1000) : 0;
+  Object.assign(talk, { state: 'idle', ctx: null, stream: null, speaker: null, holding: false, timer: 0 });
+  $('#talk-ptt').classList.remove('on');
+  talk.last = !reason || reason === 'encerrada'
+    ? (wasLive ? `Conversa encerrada (${duration(seconds)}).` : '')
+    : wasLive ? `Conversa encerrada: ${reason}.` : `Não deu para conversar: ${reason}.`;
+  talkStatus(talk.last);
+  renderTalk();
+}
+
+// Aperte para falar: enquanto segura, o som do portão fica mudo (sem eco).
+function bindPushToTalk(btn) {
+  const press = (e) => {
+    if (talk.state !== 'live' || talk.holding) return;
+    e.preventDefault();
+    talk.holding = true;
+    talk.speaker?.port.postMessage('mute');
+    btn.classList.add('on');
+    talkStatus('Falando… solte para ouvir.');
+  };
+  const release = () => {
+    if (!talk.holding) return;
+    talk.holding = false;
+    talk.speaker?.port.postMessage('unmute');
+    btn.classList.remove('on');
+    if (talk.state === 'live') talkStatus('Ouvindo. Segure o botão para falar.');
+  };
+  btn.addEventListener('pointerdown', (e) => { btn.setPointerCapture?.(e.pointerId); press(e); });
+  for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) btn.addEventListener(name, release);
+  btn.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) press(e); });
+  btn.addEventListener('keyup', (e) => { if (e.key === ' ' || e.key === 'Enter') release(); });
+  btn.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 function ringed(ev) {
@@ -895,6 +1026,10 @@ async function init() {
   $('#gate').addEventListener('click', (e) => { if (e.target.id === 'gate') closeGateSheet(); });
   bindHold($('#gate-hold'), () => doGateAction());
   $('#gate-stop').onclick = () => doGateAction('parar'); // parar é um toque só, sem segurar
+  $('#talk-start').onclick = startTalk;
+  $('#talk-end').onclick = () => endTalk();
+  bindPushToTalk($('#talk-ptt'));
+  window.addEventListener('pagehide', () => endTalk());
   $('#lightbox').onclick = () => { $('#lightbox').hidden = true; };
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;

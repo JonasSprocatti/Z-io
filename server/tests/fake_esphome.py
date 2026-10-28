@@ -16,14 +16,20 @@ from zoio import esphome as eh
 
 PORTEIRO_BUTTONS = {"abrir_portao": (0x1234ABCD, "Abrir portao"), "garagem_1": (0x2001, "Garagem 1"), "garagem_2": (0x2002, "Garagem 2")}
 PORTEIRO_SENSORS = {"campainha": (0x3000, "Campainha"), "garagem_1_aberta": (0x3001, "Garagem 1 aberta")}
+# Ações (`api: actions:`): nome -> (chave, argumentos de texto)
+PORTEIRO_SERVICES = {"conversa_iniciar": (0x4001, ["chave"]), "conversa_parar": (0x4002, [])}
+STRING_ARG = 3  # ServiceArgType.STRING
 
 
 class FakeEspHome:
-    def __init__(self, key: str, name: str = "zoio-porteiro", buttons: dict | None = None, sensors: dict | None = None, encrypted: bool = True):
+    def __init__(self, key: str, name: str = "zoio-porteiro", buttons: dict | None = None, sensors: dict | None = None, services: dict | None = None, encrypted: bool = True):
         self.psk = eh.decode_key(key)
         self.name = name
         self.buttons = dict(PORTEIRO_BUTTONS if buttons is None else buttons)
         self.sensors = dict(PORTEIRO_SENSORS if sensors is None else sensors)
+        self.services = dict(PORTEIRO_SERVICES if services is None else services)
+        self.executed: list[tuple[str, list[str]]] = []  # ações rodadas: (nome, argumentos)
+        self.on_execute = None  # chamado com (nome, argumentos), como o código da ação na placa
         self.states = {obj: False for obj in self.sensors}
         self.encrypted = encrypted
         self.pressed: list[int] = []
@@ -120,6 +126,9 @@ class FakeEspHome:
                         send_msg(eh.LIST_ENTITIES_BINARY_SENSOR, eh.pb_string(1, object_id) + eh.pb_fixed32(2, key) + eh.pb_string(3, name))
                     for object_id, (key, name) in self.buttons.items():
                         send_msg(eh.LIST_ENTITIES_BUTTON, eh.pb_string(1, object_id) + eh.pb_fixed32(2, key) + eh.pb_string(3, name))
+                    for name, (key, args) in self.services.items():
+                        arg_fields = b"".join(eh.pb_bytes(3, eh.pb_string(1, arg) + eh.pb_uint(2, STRING_ARG)) for arg in args)
+                        send_msg(eh.LIST_ENTITIES_SERVICES, eh.pb_string(1, name) + eh.pb_fixed32(2, key) + arg_fields)
                     send_msg(eh.LIST_ENTITIES_DONE)
                 elif msg_type == eh.SUBSCRIBE_STATES:
                     for object_id, state in self.states.items():
@@ -134,6 +143,14 @@ class FakeEspHome:
                         send_msg(eh.SUBSCRIBE_LOGS_RESPONSE, eh.pb_uint(1, 3) + eh.pb_string(3, line))
                 elif msg_type == eh.BUTTON_COMMAND:
                     self.pressed.append(eh.pb_parse(data)[1])
+                elif msg_type == eh.EXECUTE_SERVICE:
+                    fields = eh.pb_parse(data)
+                    name = next(n for n, (k, _) in self.services.items() if k == fields[1])
+                    # um argumento só (o pb_parse guarda o último de cada campo)
+                    args = [eh.pb_parse(fields[2])[4].decode()] if 2 in fields else []
+                    self.executed.append((name, args))
+                    if self.on_execute:
+                        self.on_execute(name, args)
                 elif msg_type == eh.PING_REQUEST:
                     send_msg(eh.PING_RESPONSE)
                 elif msg_type == eh.PING_RESPONSE:

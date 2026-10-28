@@ -58,7 +58,8 @@ DEVICE_FIELDS = {"name", "status", "admin", "approved_at", "approved_by", "last_
 GATE_KIND = "Portao"
 GARAGE_KIND = "Garagem"
 BELL_KIND = "Campainha"
-PORTARIA_KINDS = (GATE_KIND, GARAGE_KIND, BELL_KIND)
+TALK_KIND = "Conversa"
+PORTARIA_KINDS = (GATE_KIND, GARAGE_KIND, BELL_KIND, TALK_KIND)
 
 EVENT_RETENTION_DAYS = 30
 

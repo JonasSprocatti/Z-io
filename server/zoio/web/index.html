@@ -139,6 +139,15 @@
       <p id="gate-offline" class="gate-offline" hidden>A placa do porteiro está desconectada. Os comandos não chegam até ela.</p>
       <div id="gate-doors" class="doors" role="tablist" aria-label="Portas"></div>
       <div id="gate-video" class="gate-video"></div>
+      <div id="talk" class="talk" hidden>
+        <button id="talk-start" class="ghost talk-start" type="button">Conversar</button>
+        <div id="talk-live" class="talk-live" hidden>
+          <button id="talk-ptt" class="ptt" type="button" aria-describedby="talk-status">Segure para falar</button>
+          <span id="talk-time" class="talk-time" aria-label="Tempo de conversa">0:00</span>
+          <button id="talk-end" class="ghost" type="button">Encerrar</button>
+        </div>
+        <p id="talk-status" class="muted talk-status" role="status"></p>
+      </div>
       <button id="gate-hold" class="hold" type="button" aria-describedby="gate-status">
         <span id="gate-hold-label">Segure para abrir</span>
       </button>

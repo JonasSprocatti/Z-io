@@ -21,7 +21,7 @@ from .config import Config
 from .devices import APPROVED, PENDING, REVOKED, DeviceError, Devices, normalize_code, portaria_message
 from .devices import public as public_device
 from .esphome import EspHomeError
-from .porteiro import FAILED, GateBusy, GateError, Porteiro
+from .porteiro import FAILED, GATE_ID, GateBusy, GateError, Porteiro
 from .push import Notifier
 from .store import Store
 
@@ -52,6 +52,10 @@ LIVE_PATHS = {
     "stream.m3u8": "/api/stream.m3u8",
 }
 LIVE_HLS = re.compile(r"^hls/[\w.-]+$")
+
+TALK_PATH = "/api/portaria/conversa"
+TALK_QUEUE = 25  # pedaços de áudio da placa esperando o app (~0,5 s); passou disso, sai o mais velho
+WEBSOCKETS = {"/live/ws", TALK_PATH}
 
 
 # ---------------------------------------------------------------- segurança
@@ -112,7 +116,7 @@ async def security(request: web.Request, handler):
         raise web.HTTPForbidden(text="Aparelho ou usuário não autorizado no Zóio.")
     # Bloqueia pedidos vindos de outros sites (CSRF e WebSocket entre origens).
     origin = request.headers.get("Origin")
-    if origin and (request.method not in ("GET", "HEAD") or request.path == "/live/ws"):
+    if origin and (request.method not in ("GET", "HEAD") or request.path in WEBSOCKETS):
         if urlsplit(origin).netloc != request.host:
             raise web.HTTPForbidden(text="Origem não permitida.")
     request["session"] = None
@@ -586,6 +590,94 @@ async def api_portaria_photo(request: web.Request) -> web.FileResponse:
     return web.FileResponse(path, headers={"Content-Type": "image/jpeg", "Cache-Control": "private, max-age=86400"})
 
 
+async def api_portaria_conversa(request: web.Request) -> web.WebSocketResponse:
+    """Conversa com o portão, por WebSocket.
+
+    1. O app manda {"type": "iniciar", "nonce", "signature"}: um desafio novo
+       assinado com a chave do aparelho (porta "portao", comando "conversar").
+    2. O Zóio liga o microfone e o alto-falante da placa e responde {"type": "pronto"}.
+    3. Os dois lados mandam áudio em binário: PCM 16 bits little-endian, 16 kHz, mono.
+    4. O app encerra com {"type": "fim"}; o Zóio, com {"type": "fim", "motivo"}.
+    """
+    device = _portaria_device(request)
+    # heartbeat curto: celular que perdeu o sinal libera o portão em poucos segundos
+    ws = web.WebSocketResponse(heartbeat=5, max_msg_size=16 * 1024)
+    await ws.prepare(request)
+    reason = await _talk(request, ws, device)
+    if not ws.closed:
+        await ws.send_json({"type": "fim", "motivo": reason})
+        await ws.close()
+    return ws
+
+
+def _message_type(text: str) -> str | None:
+    try:
+        body = json.loads(text)
+    except ValueError:
+        return None
+    return body.get("type") if isinstance(body, dict) else None
+
+
+async def _talk(request: web.Request, ws: web.WebSocketResponse, device: dict) -> str:
+    """A conversa em si. Devolve o motivo do fim, que o app mostra."""
+    try:
+        msg = await ws.receive(timeout=20)
+    except asyncio.TimeoutError:
+        return "o aparelho não confirmou a conversa"
+    if msg.type != aiohttp.WSMsgType.TEXT:
+        return "encerrada"
+    try:
+        body = json.loads(msg.data)
+        request.app[DEVICES].verify(
+            device["id"], str(body.get("nonce", "")), str(body.get("signature", "")),
+            message=lambda nonce, device_id: portaria_message(nonce, device_id, GATE_ID, "conversar"),
+        )
+    except (ValueError, AttributeError, DeviceError, LookupError) as exc:
+        return f"confirmação do aparelho falhou: {exc}"
+
+    audio: asyncio.Queue[bytes] = asyncio.Queue()
+
+    def on_audio(pcm: bytes) -> None:
+        if audio.qsize() >= TALK_QUEUE:
+            audio.get_nowait()  # o celular atrasou: descarta o mais velho
+        audio.put_nowait(pcm)
+
+    porteiro = request.app[PORTEIRO]
+    try:
+        call = await porteiro.start_call(device["name"], device["id"], on_audio)
+    except (GateError, EspHomeError) as exc:
+        return str(exc)
+
+    async def to_app() -> str:
+        while True:
+            await ws.send_bytes(await audio.get())
+
+    async def from_app() -> str:
+        async for msg in ws:
+            if msg.type == aiohttp.WSMsgType.BINARY:
+                call.send_audio(msg.data)
+            elif msg.type == aiohttp.WSMsgType.TEXT and _message_type(msg.data) == "fim":
+                break
+        return "encerrada"
+
+    reason = "conexão com o aparelho caiu"
+    tasks = [asyncio.create_task(to_app()), asyncio.create_task(from_app()), asyncio.create_task(call.wait())]
+    try:
+        await ws.send_json({"type": "pronto"})
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        first = done.pop()
+        if not first.exception():
+            reason = first.result()
+    except (ConnectionResetError, RuntimeError):
+        pass
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await porteiro.end_call(call, reason)
+    return reason
+
+
 # ---------------------------------------------------------------- ao vivo
 
 
@@ -725,5 +817,6 @@ def create_app(cfg: Config, enable_push: bool = True) -> web.Application:
     r.add_post("/api/portaria/act", api_portaria_act)
     r.add_post("/api/portaria/check", api_portaria_check)
     r.add_get("/api/portaria/photos/{id}.jpg", api_portaria_photo)
+    r.add_get(TALK_PATH, api_portaria_conversa)
     r.add_get("/live/{tail:.+}", live_proxy)
     return app
