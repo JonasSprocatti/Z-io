@@ -47,6 +47,7 @@
   <header class="top">
     <h1>Zóio</h1>
     <span id="status" class="status" title="Estado do servidor"></span>
+    <button id="gate-btn" class="gate-btn" type="button" hidden>Portão</button>
     <div class="layout" id="layout-picker" role="group" aria-label="Câmeras por linha">
       <button data-cols="1" aria-label="1 por linha">1</button>
       <button data-cols="2" aria-label="2 por linha">2</button>
@@ -116,6 +117,7 @@
       <div class="card">
         <h2>Servidor</h2>
         <ul id="server-info" class="kv"></ul>
+        <div class="row"><button id="gate-test" class="ghost" type="button" hidden>Testar placa do portão</button></div>
       </div>
     </section>
   </main>
@@ -126,6 +128,22 @@
     <a href="#alertas" data-view="alerts">Alertas <span id="alert-badge" class="badge" hidden></span></a>
     <a href="#ajustes" data-view="settings">Ajustes <span id="settings-badge" class="badge" hidden></span></a>
   </nav>
+
+  <section id="gate" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="gate-title">
+    <div class="sheet-box">
+      <div class="sheet-bar">
+        <strong id="gate-title">Portão</strong>
+        <button id="gate-close" class="ghost" type="button">Fechar</button>
+      </div>
+      <div id="gate-video" class="gate-video"></div>
+      <button id="gate-hold" class="hold" type="button" aria-describedby="gate-status">
+        <span id="gate-hold-label">Segure para abrir</span>
+      </button>
+      <p id="gate-status" class="muted gate-status">Mantenha o botão apertado até completar o círculo.</p>
+    </div>
+  </section>
+
+  <div id="lightbox" class="lightbox" hidden><img alt="Foto do portão no momento da abertura"></div>
 
   <div id="toast" class="toast" hidden></div>
   <script type="module" src="/web/app.js"></script>

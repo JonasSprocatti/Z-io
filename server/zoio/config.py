@@ -8,6 +8,8 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .esphome import EspHomeError, decode_key
+
 DEFAULT_ENV_FILE = "/etc/zoio/zoio.env"
 
 
@@ -74,6 +76,19 @@ class Config:
     notify_cooldown: int = 300
     cache_max_mb: int = 2048
     push_contact: str = "mailto:zoio@localhost"
+    # Portão: placa ESPHome com relé (vazio = sem portão)
+    gate_host: str | None = None
+    gate_port: int = 6053
+    gate_key: str | None = None
+    gate_name: str = "zoio-portao"
+    gate_button: str = "abrir_portao"
+    gate_camera: int | None = None
+    gate_error: str | None = None  # configuração do portão com problema
+
+    @property
+    def gate_enabled(self) -> bool:
+        """O portão só funciona com a aprovação de aparelhos ligada."""
+        return bool(self.gate_host and self.gate_key and self.device_approval)
 
     @property
     def rtsp_base(self) -> str:
@@ -114,6 +129,13 @@ def load(env_file: str | None = None) -> Config:
         if i not in hidden
     ]
     host, _, port = env.get("ZOIO_LISTEN", "127.0.0.1:8080").rpartition(":")
+    gate_key, gate_error = env.get("ZOIO_GATE_KEY") or None, None
+    if gate_key:
+        try:
+            decode_key(gate_key)
+        except EspHomeError as exc:
+            gate_key, gate_error = None, f"ZOIO_GATE_KEY: {exc}"
+    gate_camera = int(env["ZOIO_GATE_CAMERA"]) if env.get("ZOIO_GATE_CAMERA", "").strip() else None
     return Config(
         dvr_host=env["DVR_HOST"],
         dvr_user=env["DVR_USER"],
@@ -133,4 +155,11 @@ def load(env_file: str | None = None) -> Config:
         notify_cooldown=int(env.get("ZOIO_NOTIFY_COOLDOWN", "300")),
         cache_max_mb=int(env.get("ZOIO_CACHE_MAX_MB", "2048")),
         push_contact=env.get("ZOIO_PUSH_CONTACT", "mailto:zoio@localhost"),
+        gate_host=env.get("ZOIO_GATE_HOST") or None,
+        gate_port=int(env.get("ZOIO_GATE_PORT", "6053")),
+        gate_key=gate_key,
+        gate_name=env.get("ZOIO_GATE_NAME", "zoio-portao"),
+        gate_button=env.get("ZOIO_GATE_BUTTON", "abrir_portao"),
+        gate_camera=gate_camera if gate_camera and any(c.number == gate_camera for c in cameras) else None,
+        gate_error=gate_error,
     )

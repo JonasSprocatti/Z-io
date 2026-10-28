@@ -79,6 +79,11 @@ def login_message(nonce: str, device_id: str) -> bytes:
     return f"zoio-login\n{nonce}\n{device_id}".encode()
 
 
+def gate_message(nonce: str, device_id: str) -> bytes:
+    """O que o aparelho assina para abrir o portão (confirmação além da sessão)."""
+    return f"zoio-portao\n{nonce}\n{device_id}".encode()
+
+
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -136,20 +141,31 @@ class Devices:
             raise DeviceError("mais de um aparelho combina; use o id completo")
         return matches[0]
 
-    def approve(self, device_id: str, admin: bool, by: str) -> dict:
+    def approve(self, device_id: str, admin: bool, by: str, gate: bool | None = None) -> dict:
+        """Aprova. Sem dizer nada sobre o portão, só administradores podem abri-lo."""
         device = self.store.device(device_id)
         if device is None:
             raise DeviceError("aparelho não encontrado")
         if device["status"] == REVOKED:
             raise DeviceError("aparelho revogado; exclua e peça um novo cadastro")
-        self.store.update_device(device_id, status=APPROVED, admin=int(admin), approved_at=time.time(), approved_by=by)
+        gate = admin if gate is None else gate
+        self.store.update_device(device_id, status=APPROVED, admin=int(admin), gate=int(gate), approved_at=time.time(), approved_by=by)
+        return self.store.device(device_id)
+
+    def set_gate(self, device_id: str, allow: bool) -> dict:
+        device = self.store.device(device_id)
+        if device is None:
+            raise DeviceError("aparelho não encontrado")
+        if allow and device["status"] != APPROVED:
+            raise DeviceError("só aparelhos aprovados podem abrir o portão")
+        self.store.update_device(device_id, gate=int(allow))
         return self.store.device(device_id)
 
     def revoke(self, device_id: str) -> dict:
         device = self.store.device(device_id)
         if device is None:
             raise DeviceError("aparelho não encontrado")
-        self.store.update_device(device_id, status=REVOKED, admin=0)
+        self.store.update_device(device_id, status=REVOKED, admin=0, gate=0)
         self.store.delete_sessions(device_id)
         self.store.delete_device_subscriptions(device_id)
         return self.store.device(device_id)
@@ -174,7 +190,7 @@ class Devices:
         self._challenges[nonce] = now + CHALLENGE_TTL
         return nonce
 
-    def verify(self, device_id: str, nonce: str, signature: str) -> dict:
+    def verify(self, device_id: str, nonce: str, signature: str, message=login_message) -> dict:
         """Confere a assinatura do desafio. Devolve o aparelho (qualquer status)."""
         expires = self._challenges.pop(str(nonce), None)  # uso único, mesmo se falhar
         if expires is None or expires < time.time():
@@ -188,7 +204,7 @@ class Devices:
         der = encode_dss_signature(int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:], "big"))
         key = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), b64u_decode(device["public_key"]))
         try:
-            key.verify(der, login_message(nonce, device["id"]), ec.ECDSA(hashes.SHA256()))
+            key.verify(der, message(nonce, device["id"]), ec.ECDSA(hashes.SHA256()))
         except InvalidSignature as exc:
             raise DeviceError("assinatura inválida") from exc
         return device
@@ -234,6 +250,7 @@ def public(device: dict, current_id: str | None = None) -> dict:
         "code": device["code"],
         "status": device["status"],
         "admin": bool(device["admin"]),
+        "gate": bool(device.get("gate")),
         "user": device.get("user"),
         "user_agent": device.get("user_agent"),
         "created_at": device["created_at"],

@@ -30,8 +30,8 @@ class Phone:
         self.code = None
         self.cookie = None
 
-    def sign(self, nonce: str, device_id: str) -> str:
-        r, s = decode_dss_signature(self.key.sign(dev.login_message(nonce, device_id), ec.ECDSA(hashes.SHA256())))
+    def sign(self, nonce: str, device_id: str, message=dev.login_message) -> str:
+        r, s = decode_dss_signature(self.key.sign(message(nonce, device_id), ec.ECDSA(hashes.SHA256())))
         return b64u(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
 
     async def register(self, client):

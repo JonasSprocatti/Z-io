@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zoio"
-version = "0.2.0"
+version = "0.3.0"
 description = "Servidor leve para ver as câmeras do DVR de casa (Raspberry Pi + Tailscale)"
 requires-python = ">=3.10"
 dependencies = ["aiohttp>=3.8", "cryptography>=3.4"]
 
 [project.optional-dependencies]
-test = ["pytest", "pytest-asyncio", "pytest-aiohttp"]
+test = ["pytest", "pytest-asyncio", "pytest-aiohttp", "noiseprotocol"]
 
 [project.scripts]
 zoio = "zoio.__main__:main"

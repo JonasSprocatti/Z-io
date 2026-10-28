@@ -134,6 +134,18 @@ class Notifier:
                 sent += 1
         return sent
 
+    async def gate_opened(self, by: str, device_id: str | None) -> int:
+        """Avisa os outros administradores que o portão foi aberto."""
+        payload = json.dumps(
+            {"title": "Portão aberto", "body": f"por {by}", "tag": "portao", "url": "/#alertas"},
+            ensure_ascii=False,
+        ).encode()
+        sent = 0
+        for item in self.store.subscriptions(admins_only=True):
+            if item["device_id"] != device_id and await self.send(item["sub"], payload):
+                sent += 1
+        return sent
+
     async def send(self, sub: dict, payload: bytes) -> bool:
         if self._session is None:
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))

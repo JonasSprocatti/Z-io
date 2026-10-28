@@ -163,3 +163,46 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .list li .head { display: flex; gap: 10px; align-items: center; }
 /* o player do go2rtc mostra o modo (MSE/HLS) no canto; na grade só interessa erro */
 .tile video-stream .mode { display: none; }
+
+/* portão */
+.gate-btn { margin-left: 8px; min-height: 32px; padding: 4px 12px; background: transparent; border-color: var(--ok); color: var(--ok); }
+body:not(.live) .gate-btn { margin-left: auto; }
+.sheet {
+  position: fixed; inset: 0; z-index: 15; display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, .6);
+}
+.sheet-box {
+  width: 100%; max-width: 560px; max-height: 100%; overflow-y: auto;
+  padding: 14px 16px calc(20px + env(safe-area-inset-bottom));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px 16px 0 0;
+}
+.sheet-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.gate-video { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden; }
+.gate-video video-stream, .gate-video video { position: absolute; inset: 0; width: 100%; height: 100%; }
+.gate-video video { object-fit: contain; }
+.gate-video .mode { display: none; }
+.gate-video:empty::after { content: "Sem câmera do portão definida"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+.hold {
+  --p: 0;
+  display: grid; place-items: center; width: 150px; height: 150px; margin: 18px auto 8px; padding: 0;
+  border-radius: 50%; border: 0; color: #fff; font-size: 15px; line-height: 1.2; text-align: center;
+  background:
+    radial-gradient(closest-side, var(--panel) 82%, transparent 83% 100%),
+    conic-gradient(var(--ok) calc(var(--p) * 1turn), var(--line) 0);
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+.hold span { max-width: 100px; }
+.hold:disabled { opacity: 1; }
+#gate-test { margin-top: 12px; }
+.hold.done { background: radial-gradient(closest-side, var(--ok) 82%, transparent 83% 100%), conic-gradient(var(--ok) 1turn, var(--line) 0); }
+.hold.failed { background: radial-gradient(closest-side, var(--panel) 82%, transparent 83% 100%), conic-gradient(var(--alert) 1turn, var(--line) 0); }
+.gate-status { text-align: center; min-height: 2.8em; }
+.list li img.thumb { width: 72px; height: 48px; object-fit: cover; border-radius: 6px; cursor: zoom-in; background: #000; }
+.tag.gate { background: rgba(63, 191, 127, .15); color: var(--ok); }
+.lightbox { position: fixed; inset: 0; z-index: 25; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .85); cursor: zoom-out; }
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--radius); }
+@media (min-width: 700px) {
+  .sheet { align-items: center; }
+  .sheet-box { border-radius: 16px; }
+}
+

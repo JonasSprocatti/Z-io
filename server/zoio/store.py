@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS events (
     kind TEXT NOT NULL,
     status TEXT NOT NULL,
     dvr_time TEXT,
-    received_at REAL NOT NULL
+    received_at REAL NOT NULL,
+    detail TEXT
 );
 CREATE INDEX IF NOT EXISTS events_received ON events(received_at);
 CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -40,7 +41,8 @@ CREATE TABLE IF NOT EXISTS devices (
     created_at REAL NOT NULL,
     approved_at REAL,
     approved_by TEXT,
-    last_seen REAL
+    last_seen REAL,
+    gate INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -51,7 +53,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_device ON sessions(device_id);
 """
 
-DEVICE_FIELDS = {"name", "status", "admin", "approved_at", "approved_by", "last_seen"}
+DEVICE_FIELDS = {"name", "status", "admin", "approved_at", "approved_by", "last_seen", "gate"}
+
+GATE_KIND = "Portao"
 
 EVENT_RETENTION_DAYS = 30
 
@@ -63,26 +67,38 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
-        columns = {r["name"] for r in self.db.execute("PRAGMA table_info(push_subscriptions)")}
-        if "device_id" not in columns:  # bancos da versão 0.1
+        self._migrate()
+
+    def _columns(self, table: str) -> set[str]:
+        return {r["name"] for r in self.db.execute(f"PRAGMA table_info({table})")}
+
+    def _migrate(self) -> None:
+        if "device_id" not in self._columns("push_subscriptions"):  # bancos da versão 0.1
             self.db.execute("ALTER TABLE push_subscriptions ADD COLUMN device_id TEXT")
-            self.db.commit()
+        if "detail" not in self._columns("events"):  # bancos da versão 0.2
+            self.db.execute("ALTER TABLE events ADD COLUMN detail TEXT")
+        if "gate" not in self._columns("devices"):
+            self.db.execute("ALTER TABLE devices ADD COLUMN gate INTEGER NOT NULL DEFAULT 0")
+            # quem já administrava o Zóio pode abrir o portão
+            self.db.execute("UPDATE devices SET gate = 1 WHERE admin = 1 AND status = 'approved'")
+        self.db.commit()
 
     def close(self) -> None:
         self.db.close()
 
     # ---- eventos ----
 
-    def add_event(self, camera: int, kind: str, status: str, dvr_time: str | None) -> dict:
+    def add_event(self, camera: int, kind: str, status: str, dvr_time: str | None, detail: dict | None = None) -> dict:
         now = time.time()
         cur = self.db.execute(
-            "INSERT INTO events(camera, kind, status, dvr_time, received_at) VALUES (?,?,?,?,?)",
-            (camera, kind, status, dvr_time, now),
+            "INSERT INTO events(camera, kind, status, dvr_time, received_at, detail) VALUES (?,?,?,?,?,?)",
+            (camera, kind, status, dvr_time, now, json.dumps(detail, ensure_ascii=False) if detail else None),
         )
         self.db.commit()
-        return {"id": cur.lastrowid, "camera": camera, "kind": kind, "status": status, "dvr_time": dvr_time, "received_at": now}
+        return {"id": cur.lastrowid, "camera": camera, "kind": kind, "status": status, "dvr_time": dvr_time, "received_at": now, "detail": detail}
 
     def events(self, limit: int = 100, before_id: int | None = None, camera: int | None = None, status: str | None = "Start") -> list[dict]:
+        """Eventos do mais novo ao mais antigo. Com `status`, os do portão entram sempre."""
         sql = "SELECT * FROM events WHERE 1=1"
         args: list = []
         if before_id:
@@ -92,11 +108,14 @@ class Store:
             sql += " AND camera = ?"
             args.append(camera)
         if status:
-            sql += " AND status = ?"
-            args.append(status)
+            sql += " AND (status = ? OR kind = ?)"
+            args += [status, GATE_KIND]
         sql += " ORDER BY id DESC LIMIT ?"
         args.append(min(limit, 500))
-        return [dict(r) for r in self.db.execute(sql, args)]
+        rows = [dict(r) for r in self.db.execute(sql, args)]
+        for r in rows:
+            r["detail"] = json.loads(r["detail"]) if r.get("detail") else None
+        return rows
 
     def prune_events(self) -> None:
         self.db.execute("DELETE FROM events WHERE received_at < ?", (time.time() - EVENT_RETENTION_DAYS * 86400,))

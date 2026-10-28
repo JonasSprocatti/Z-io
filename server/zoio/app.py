@@ -18,8 +18,10 @@ from . import __version__
 from .alarms import AlarmListener, EventBus
 from .clips import Clips
 from .config import Config
-from .devices import APPROVED, PENDING, REVOKED, DeviceError, Devices, normalize_code
+from .devices import APPROVED, PENDING, REVOKED, DeviceError, Devices, gate_message, normalize_code
 from .devices import public as public_device
+from .esphome import EspHomeError
+from .gate import FAILED, Gate, GateBusy, GateError
 from .push import Notifier
 from .store import Store
 
@@ -36,6 +38,7 @@ ALARMS = "zoio_alarms"
 NOTIFIER = "zoio_notifier"
 HTTP = "zoio_http"
 DEVICES = "zoio_devices"
+GATE = "zoio_gate"
 BG_TASKS = "zoio_bg_tasks"
 
 SESSION_COOKIE = "zoio_sessao"
@@ -182,6 +185,11 @@ async def api_config(request: web.Request) -> web.Response:
             "push_key": notifier.vapid.public_key if notifier else None,
             "device_approval": cfg.device_approval,
             "device": public_device(current_device(request), current_device(request)["id"]) if current_device(request) else None,
+            "gate": {
+                "enabled": request.app[GATE].enabled,
+                "camera": cfg.gate_camera,
+                "allowed": bool((current_device(request) or {}).get("gate")),
+            },
         }
     )
 
@@ -200,6 +208,8 @@ async def api_status(request: web.Request) -> web.Response:
             "alerts": bool(alarms and alarms.connected),
             "alerts_error": alarms.last_error if alarms else "alertas desligados",
             "last_event_at": alarms.last_event_at if alarms else None,
+            "gate": request.app[GATE].enabled,
+            "gate_error": request.app[CFG].gate_error,
             "time": time.time(),
         }
     )
@@ -479,7 +489,7 @@ async def api_device_approve(request: web.Request) -> web.Response:
     target = next((d for d in request.app[STORE].devices(status=PENDING) if normalize_code(d["code"]) == code), None) if code else None
     if target is None:
         raise web.HTTPNotFound(text="nenhum aparelho aguardando com esse código")
-    device = request.app[DEVICES].approve(target["id"], admin=bool(body.get("admin")), by=me["id"])
+    device = request.app[DEVICES].approve(target["id"], admin=bool(body.get("admin")), by=me["id"], gate=bool(body["gate"]) if "gate" in body else None)
     request.app[BUS].publish({"type": "device", "status": APPROVED, "id": device["id"], "name": device["name"], "code": device["code"]})
     return web.json_response(public_device(device, me["id"]))
 
@@ -502,6 +512,75 @@ async def api_device_delete(request: web.Request) -> web.Response:
         raise web.HTTPConflict(text="revogue o aparelho antes de excluir")
     request.app[DEVICES].delete(target["id"])
     return web.json_response({"ok": True})
+
+
+async def api_device_gate(request: web.Request) -> web.Response:
+    me = require_admin(request)
+    target = _target_device(request)
+    body = await json_body(request)
+    try:
+        device = request.app[DEVICES].set_gate(target["id"], bool(body.get("allow")))
+    except DeviceError as exc:
+        raise web.HTTPConflict(text=str(exc))
+    return web.json_response(public_device(device, me["id"]))
+
+
+# ---------------------------------------------------------------- portão
+
+
+def _gate_device(request: web.Request) -> dict:
+    """Aparelho com sessão e permissão para o portão (que precisa estar configurado)."""
+    if not request.app[GATE].enabled:
+        raise web.HTTPNotFound(text="portão não configurado")
+    device = current_device(request)
+    if device is None or not device.get("gate"):
+        raise web.HTTPForbidden(text="este aparelho não tem permissão para abrir o portão")
+    return device
+
+
+async def api_gate_challenge(request: web.Request) -> web.Response:
+    _gate_device(request)
+    try:
+        return web.json_response({"nonce": request.app[DEVICES].challenge()})
+    except DeviceError as exc:
+        raise web.HTTPTooManyRequests(text=str(exc))
+
+
+async def api_gate_open(request: web.Request) -> web.Response:
+    """Abre o portão. Além da sessão, o aparelho assina um desafio novo com a chave dele."""
+    device = _gate_device(request)
+    body = await json_body(request)
+    try:
+        request.app[DEVICES].verify(device["id"], str(body.get("nonce", "")), str(body.get("signature", "")), message=gate_message)
+    except (DeviceError, LookupError) as exc:
+        raise web.HTTPUnauthorized(text=f"confirmação do aparelho falhou: {exc}")
+    try:
+        event = await request.app[GATE].open(device["name"], device["id"], request.app[HTTP])
+    except GateBusy as exc:
+        raise web.HTTPTooManyRequests(text=str(exc))
+    except GateError as exc:
+        raise web.HTTPNotFound(text=str(exc))
+    return web.json_response(event, status=502 if event["status"] == FAILED else 200)
+
+
+async def api_gate_check(request: web.Request) -> web.Response:
+    require_admin(request)
+    try:
+        return web.json_response(await request.app[GATE].check())
+    except GateError as exc:
+        raise web.HTTPNotFound(text=str(exc))
+    except EspHomeError as exc:
+        raise web.HTTPBadGateway(text=str(exc))
+
+
+async def api_gate_photo(request: web.Request) -> web.FileResponse:
+    raw = request.match_info["id"]
+    if not raw.isdigit():
+        raise web.HTTPNotFound()
+    path = request.app[GATE].photo_path(int(raw))
+    if not path.exists():
+        raise web.HTTPNotFound(text="foto não encontrada")
+    return web.FileResponse(path, headers={"Content-Type": "image/jpeg", "Cache-Control": "private, max-age=86400"})
 
 
 # ---------------------------------------------------------------- ao vivo
@@ -580,6 +659,7 @@ async def _lifecycle(app: web.Application):
         while True:
             app[STORE].prune_events()
             app[STORE].prune_sessions()
+            app[GATE].prune()
             await asyncio.sleep(6 * 3600)
 
     tasks.append(asyncio.create_task(housekeeping()))
@@ -606,6 +686,7 @@ def create_app(cfg: Config, enable_push: bool = True) -> web.Application:
     if enable_push:
         app[NOTIFIER] = notifier = Notifier(store, cfg.push_contact, cfg.notify_cooldown, cfg.notify_channels, approved_only=cfg.device_approval)
     app[ALARMS] = AlarmListener(cfg, store, bus, notifier)
+    app[GATE] = Gate(cfg, store, bus, notifier)
     app.cleanup_ctx.append(_lifecycle)
 
     r = app.router
@@ -634,5 +715,10 @@ def create_app(cfg: Config, enable_push: bool = True) -> web.Application:
     r.add_post("/api/devices/approve", api_device_approve)
     r.add_post("/api/devices/{id}/revoke", api_device_revoke)
     r.add_post("/api/devices/{id}/delete", api_device_delete)
+    r.add_post("/api/devices/{id}/gate", api_device_gate)
+    r.add_post("/api/gate/challenge", api_gate_challenge)
+    r.add_post("/api/gate/open", api_gate_open)
+    r.add_post("/api/gate/check", api_gate_check)
+    r.add_get("/api/gate/photos/{id}.jpg", api_gate_photo)
     r.add_get("/live/{tail:.+}", live_proxy)
     return app
