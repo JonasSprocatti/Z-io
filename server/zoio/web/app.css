@@ -85,14 +85,14 @@ a.ghost { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px
 .brand-mark img { display: block; width: 100%; height: 100%; filter: drop-shadow(0 2px 8px rgba(77, 163, 255, .25)); }
 .brand h1 { font-size: 20px; font-weight: 750; margin: 0; letter-spacing: .2px; }
 /* bolinha de estado no canto da logo */
-.status {
+.brand-mark .status {
   position: absolute; right: -3px; bottom: -3px;
   width: 12px; height: 12px; border-radius: 50%;
   background: var(--muted); border: 2px solid var(--bg);
 }
-.status.ok { background: var(--ok); box-shadow: 0 0 8px rgba(63, 191, 127, .6); }
-.status.warn { background: var(--warn); }
-.status.bad { background: var(--alert); }
+.brand-mark .status.ok { background: var(--ok); box-shadow: 0 0 8px rgba(63, 191, 127, .6); }
+.brand-mark .status.warn { background: var(--warn); }
+.brand-mark .status.bad { background: var(--alert); }
 
 .layout {
   margin-left: auto; display: flex; gap: 2px; padding: 3px;
@@ -308,6 +308,8 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .cam-item .cam-save[hidden], .cam-item.editing > button { display: none; }
 /* o player do go2rtc mostra o modo (MSE/HLS) no canto; na grade só interessa erro */
 .tile video-stream .mode { display: none; }
+/* e o .status dele só tem texto quando dá erro (não confundir com a bolinha da logo) */
+video-stream .status { font-size: 12px; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
 
 /* ------------------------------------------------------------------ portão */
 
