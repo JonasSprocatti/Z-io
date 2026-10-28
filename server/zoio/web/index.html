@@ -13,11 +13,41 @@
   <link rel="stylesheet" href="/web/app.css">
 </head>
 <body>
+  <!-- ícones (traço 2px, 24x24), usados com <use href="#i-..."> -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-live" viewBox="0 0 24 24"><rect x="2" y="6" width="14" height="12" rx="2.5"/><path d="m16 10.5 5-3v9l-5-3"/></symbol>
+      <symbol id="i-rec" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3.5 2"/></symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+      <symbol id="i-gate" viewBox="0 0 24 24"><path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-9h10v9M12 12v9"/></symbol>
+      <symbol id="i-garage" viewBox="0 0 24 24"><path d="M3 21V9l9-6 9 6v12"/><path d="M7 21v-9h10v9M7 15h10M7 18h10"/></symbol>
+      <symbol id="i-motion" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+      <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+    </defs>
+  </svg>
+
+  <div id="splash" class="splash" aria-hidden="true">
+    <img src="/web/icons/logo.svg" alt="" width="96" height="96">
+    <span>Zóio</span>
+  </div>
   <section id="pair" class="pair" hidden>
     <div class="pair-box">
-      <h1>Zóio</h1>
+      <div class="pair-hero">
+        <img class="pair-logo" src="/web/icons/logo.svg" alt="" width="88" height="88">
+        <h1>Zóio</h1>
+        <p class="muted">Câmeras de casa</p>
+      </div>
       <div id="pair-wait">
-        <p>Este aparelho ainda não tem permissão para ver as câmeras.</p>
+        <p class="pair-lead"><svg class="icon"><use href="#i-lock"/></svg>Este aparelho ainda não tem permissão para ver as câmeras.</p>
         <p class="muted">Código deste aparelho</p>
         <div id="pair-code" class="pair-code">····-····</div>
         <label class="field">Nome do aparelho
@@ -45,9 +75,11 @@
   </section>
 
   <header class="top">
-    <h1>Zóio</h1>
-    <span id="status" class="status" title="Estado do servidor"></span>
-    <button id="gate-btn" class="gate-btn" type="button" hidden>Portaria</button>
+    <a class="brand" href="#ao-vivo" aria-label="Zóio, início">
+      <span class="brand-mark"><img src="/web/icons/logo.svg" alt="" width="34" height="34"><span id="status" class="status" title="Estado do servidor"></span></span>
+      <h1>Zóio</h1>
+    </a>
+    <button id="gate-btn" class="gate-btn" type="button" aria-label="Portaria" hidden><svg class="icon"><use href="#i-gate"/></svg><span>Portaria</span></button>
     <div class="layout" id="layout-picker" role="group" aria-label="Câmeras por linha">
       <button data-cols="1" aria-label="1 por linha">1</button>
       <button data-cols="2" aria-label="2 por linha">2</button>
@@ -63,9 +95,9 @@
 
     <section id="view-single" class="view" hidden>
       <div class="single-bar">
-        <button id="single-back" class="ghost">‹ Voltar</button>
+        <button id="single-back" class="ghost"><svg class="icon"><use href="#i-back"/></svg>Voltar</button>
         <strong id="single-name"></strong>
-        <button id="single-rec" class="ghost">Gravações</button>
+        <button id="single-rec" class="ghost"><svg class="icon"><use href="#i-rec"/></svg>Gravações</button>
       </div>
       <div id="single-video" class="single-video"></div>
     </section>
@@ -75,12 +107,12 @@
         <select id="rec-camera" aria-label="Câmera"></select>
         <input id="rec-date" type="date" aria-label="Dia">
         <label class="check"><input id="rec-motion" type="checkbox"> só movimento</label>
-        <button type="submit">Buscar</button>
+        <button type="submit"><svg class="icon"><use href="#i-search"/></svg>Buscar</button>
       </form>
       <div id="player" class="player" hidden>
         <div id="player-status"></div>
         <video id="player-video" controls playsinline hidden></video>
-        <a id="player-download" class="ghost" hidden>Baixar MP4</a>
+        <a id="player-download" class="ghost" hidden><svg class="icon"><use href="#i-download"/></svg>Baixar MP4</a>
       </div>
       <ul id="rec-list" class="list"></ul>
     </section>
@@ -92,7 +124,7 @@
 
     <section id="view-settings" class="view" hidden>
       <div class="card">
-        <h2>Notificações</h2>
+        <h2><svg class="icon"><use href="#i-bell"/></svg>Notificações</h2>
         <p id="push-info" class="muted"></p>
         <div id="push-cameras" class="chips"></div>
         <div class="row">
@@ -102,7 +134,7 @@
         </div>
       </div>
       <div class="card">
-        <h2>Este aparelho</h2>
+        <h2><svg class="icon"><use href="#i-phone"/></svg>Este aparelho</h2>
         <ul id="device-info" class="kv"></ul>
         <div id="device-rename" class="row" hidden>
           <input id="device-name" maxlength="60" aria-label="Nome deste aparelho">
@@ -110,12 +142,12 @@
         </div>
       </div>
       <div id="devices-card" class="card" hidden>
-        <h2>Aparelhos</h2>
+        <h2><svg class="icon"><use href="#i-shield"/></svg>Aparelhos</h2>
         <p class="muted">Só os aparelhos aprovados aqui conseguem abrir o Zóio. Ao aprovar, digite o código que aparece na tela do aparelho novo.</p>
         <ul id="device-list" class="list"></ul>
       </div>
       <div class="card">
-        <h2>Servidor</h2>
+        <h2><svg class="icon"><use href="#i-server"/></svg>Servidor</h2>
         <ul id="server-info" class="kv"></ul>
         <div class="row"><button id="gate-test" class="ghost" type="button" hidden>Testar placa do porteiro</button></div>
       </div>
@@ -123,16 +155,17 @@
   </main>
 
   <nav class="tabs">
-    <a href="#ao-vivo" data-view="live">Ao vivo</a>
-    <a href="#gravacoes" data-view="recordings">Gravações</a>
-    <a href="#alertas" data-view="alerts">Alertas <span id="alert-badge" class="badge" hidden></span></a>
-    <a href="#ajustes" data-view="settings">Ajustes <span id="settings-badge" class="badge" hidden></span></a>
+    <a href="#ao-vivo" data-view="live"><svg class="icon"><use href="#i-live"/></svg><span>Ao vivo</span></a>
+    <a href="#gravacoes" data-view="recordings"><svg class="icon"><use href="#i-rec"/></svg><span>Gravações</span></a>
+    <a href="#alertas" data-view="alerts"><svg class="icon"><use href="#i-bell"/></svg><span>Alertas</span><span id="alert-badge" class="badge" hidden></span></a>
+    <a href="#ajustes" data-view="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Ajustes</span><span id="settings-badge" class="badge" hidden></span></a>
   </nav>
 
   <section id="gate" class="sheet" hidden role="dialog" aria-modal="true" aria-labelledby="gate-title">
     <div class="sheet-box">
+      <div class="sheet-grip" aria-hidden="true"></div>
       <div class="sheet-bar">
-        <strong id="gate-title">Portaria</strong>
+        <strong><svg class="icon"><use href="#i-gate"/></svg><span id="gate-title">Portaria</span></strong>
         <button id="gate-close" class="ghost" type="button">Fechar</button>
       </div>
       <p id="gate-ring" class="ring" role="status" hidden></p>
@@ -140,7 +173,7 @@
       <div id="gate-doors" class="doors" role="tablist" aria-label="Portas"></div>
       <div id="gate-video" class="gate-video"></div>
       <div id="talk" class="talk" hidden>
-        <button id="talk-start" class="ghost talk-start" type="button">Conversar</button>
+        <button id="talk-start" class="ghost talk-start" type="button"><svg class="icon"><use href="#i-mic"/></svg><span id="talk-start-label">Conversar</span></button>
         <div id="talk-live" class="talk-live" hidden>
           <button id="talk-ptt" class="ptt" type="button" aria-describedby="talk-status">Segure para falar</button>
           <span id="talk-time" class="talk-time" aria-label="Tempo de conversa">0:00</span>

@@ -34,7 +34,12 @@ function ensureSession() {
   return sessionPromise;
 }
 
+function hideSplash() {
+  $('#splash')?.remove();
+}
+
 function showPair(mode, rec) {
+  hideSplash();
   $('#pair').hidden = false;
   $('#pair-wait').hidden = mode !== 'wait';
   $('#pair-revoked').hidden = mode !== 'revoked';
@@ -128,6 +133,17 @@ function el(tag, attrs = {}, ...children) {
   node.append(...children.filter((c) => c !== null && c !== undefined));
   return node;
 }
+// Ícone do conjunto que fica no index.html (<symbol id="i-...">).
+function icon(name, cls = 'icon') {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', cls);
+  svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+const evIcon = (name, tone) => el('span', { class: `ev-icon ${tone}` }, icon(name));
 
 // ------------------------------------------------------------------ ao vivo
 
@@ -160,7 +176,7 @@ async function renderGrid() {
   if (grid.childElementCount) return;
   for (const cam of state.cameras) {
     const tile = el('div', { class: 'tile', 'data-cam': cam.number, onclick: () => { location.hash = `#camera/${cam.number}`; } },
-      el('span', { class: 'label' }, cam.name));
+      el('span', { class: 'label' }, cam.name), el('span', { class: 'motion-chip' }, 'movimento'));
     grid.append(tile);
     tile.prepend(makeStream(cam.sub, { controls: false }));
     state.liveEls.set(cam.number, tile);
@@ -207,10 +223,11 @@ async function searchRecordings() {
     if ($('#rec-motion').checked) items = items.filter((i) => i.motion);
     if (!items.length) { list.replaceChildren(el('li', { class: 'empty' }, 'Nenhuma gravação nesse dia.')); return; }
     list.replaceChildren(...items.map((it) => el('li', {},
+      evIcon(it.motion ? 'motion' : 'rec', it.motion ? 'bad' : 'info'),
       el('div', { class: 'main' },
         el('div', {}, `${hhmm(it.begin)} – ${hhmm(it.end)} `, it.motion ? el('span', { class: 'tag' }, 'movimento') : null),
         el('div', { class: 'sub' }, mb(it.size))),
-      el('button', { class: 'ghost', onclick: () => openClip(it) }, 'Assistir'))));
+      el('button', { class: 'ghost small', onclick: () => openClip(it) }, icon('play'), 'Assistir'))));
   } catch (err) {
     list.replaceChildren(el('li', { class: 'empty' }, `Erro: ${err.message}`));
   }
@@ -293,12 +310,15 @@ function portariaItem(ev, when, date) {
     who = 'pelo controle ou na mão';
   } else title = failed ? `${d.name ?? 'Garagem'}: comando falhou` : `${d.name ?? 'Garagem'}: ${ev.status.toLowerCase()}`;
   const tag = { Campainha: ['bell', 'campainha'], Portao: ['gate', 'portão'], Garagem: ['gate', 'garagem'], Conversa: ['gate', 'conversa'] }[ev.kind];
+  const symbol = { Campainha: 'bell', Portao: 'gate', Garagem: 'garage', Conversa: 'mic' }[ev.kind];
   return el('li', {},
-    d.photo ? el('img', { class: 'thumb', src: `/api/portaria/photos/${ev.id}.jpg`, alt: `Foto: ${title}`, loading: 'lazy', onclick: () => showPhoto(ev.id) }) : null,
+    d.photo
+      ? el('img', { class: 'thumb', src: `/api/portaria/photos/${ev.id}.jpg`, alt: `Foto: ${title}`, loading: 'lazy', onclick: () => showPhoto(ev.id) })
+      : evIcon(symbol, failed ? 'bad' : ev.kind === 'Campainha' ? 'warn' : 'ok'),
     el('div', { class: 'main' },
       el('div', {}, `${title} `, el('span', { class: failed ? 'tag' : `tag ${tag[0]}` }, tag[1])),
       el('div', { class: 'sub' }, [who, when.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }), failed ? d.error : null].filter(Boolean).join(' · '))),
-    ev.camera ? el('a', { class: 'ghost', href: `#gravacoes?cam=${ev.camera}&date=${date}` }, 'Gravação') : null);
+    ev.camera ? el('a', { class: 'ghost small', href: `#gravacoes?cam=${ev.camera}&date=${date}` }, icon('rec'), 'Gravação') : null);
 }
 
 function alertItem(ev) {
@@ -306,10 +326,11 @@ function alertItem(ev) {
   const date = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
   if (PORTARIA_KINDS.has(ev.kind)) return portariaItem(ev, when, date);
   return el('li', {},
+    evIcon('motion', 'bad'),
     el('div', { class: 'main' },
       el('div', {}, ev.name ?? camName(ev.camera), ' ', el('span', { class: 'tag' }, ev.kind === 'VideoMotion' ? 'movimento' : ev.kind)),
       el('div', { class: 'sub' }, when.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }))),
-    el('a', { class: 'ghost', href: `#gravacoes?cam=${ev.camera}&date=${date}` }, 'Gravação'));
+    el('a', { class: 'ghost small', href: `#gravacoes?cam=${ev.camera}&date=${date}` }, icon('rec'), 'Gravação'));
 }
 
 async function loadAlerts(more = false) {
@@ -682,7 +703,7 @@ function renderTalk() {
   $('#talk-start').hidden = talk.state === 'live';
   $('#talk-live').hidden = talk.state !== 'live';
   $('#talk-start').disabled = mine || !!p.talking || p.online === false;
-  $('#talk-start').textContent = talk.state === 'connecting' ? 'Chamando…' : 'Conversar';
+  $('#talk-start-label').textContent = talk.state === 'connecting' ? 'Chamando…' : 'Conversar';
   if (talk.state === 'live') $('#talk-time').textContent = duration(Math.floor((Date.now() - talk.started) / 1000));
   else if (!mine) $('#talk-status').textContent = p.talking ? `${p.talking} está conversando no portão.` : talk.last;
 }
@@ -851,14 +872,15 @@ function deviceItem(d) {
     refreshDevices();
   };
   const actions = [];
-  if (d.status === 'pending') actions.push(el('button', { class: 'ghost', onclick: () => act('revoke', `Recusar o pedido de "${d.name}"?`) }, 'Recusar'));
-  if (d.status === 'approved' && !d.current) actions.push(el('button', { class: 'ghost', onclick: () => act('revoke', `Revogar "${d.name}"? Ele perde o acesso na hora.`) }, 'Revogar'));
-  if (d.status === 'revoked') actions.push(el('button', { class: 'ghost', onclick: () => act('delete', `Excluir "${d.name}"? Ele poderá pedir acesso de novo.`) }, 'Excluir'));
+  if (d.status === 'pending') actions.push(el('button', { class: 'ghost small danger', onclick: () => act('revoke', `Recusar o pedido de "${d.name}"?`) }, 'Recusar'));
+  if (d.status === 'approved' && !d.current) actions.push(el('button', { class: 'ghost small danger', onclick: () => act('revoke', `Revogar "${d.name}"? Ele perde o acesso na hora.`) }, 'Revogar'));
+  if (d.status === 'revoked') actions.push(el('button', { class: 'ghost small', onclick: () => act('delete', `Excluir "${d.name}"? Ele poderá pedir acesso de novo.`) }, 'Excluir'));
   const gateOn = portaria().enabled;
   if (gateOn && d.status === 'approved') {
-    actions.push(el('button', { class: 'ghost', onclick: () => setGatePermission(d, !d.gate) }, d.gate ? 'Bloquear portaria' : 'Liberar portaria'));
+    actions.push(el('button', { class: 'ghost small', onclick: () => setGatePermission(d, !d.gate) }, d.gate ? 'Bloquear portaria' : 'Liberar portaria'));
   }
   return el('li', {},
+    evIcon('phone', { wait: 'warn', ok: 'info', off: 'muted' }[cls]),
     el('div', { class: 'main' },
       el('div', {}, d.name, d.current ? ' (este aparelho) ' : ' ', el('span', { class: `tag ${cls}` }, label),
         gateOn && d.status === 'approved' && d.gate ? el('span', { class: 'tag gate' }, 'portaria') : null),
@@ -1015,6 +1037,7 @@ async function init() {
     return;
   }
   state.cameras = state.config.cameras;
+  hideSplash();
   setCols(store.get('cols', window.innerWidth >= 900 ? 4 : 2));
   $('#layout-picker').addEventListener('click', (e) => { if (e.target.dataset.cols) setCols(Number(e.target.dataset.cols)); });
   $('#single-back').onclick = () => { history.length > 1 ? history.back() : (location.hash = '#ao-vivo'); };
