@@ -18,6 +18,8 @@ Fluxo:
    processou o comando (a resposta ao ping só chega depois dele).
 6. SubscribeLogsRequest, só para aprender códigos de rádio: o receptor da
    placa escreve no log cada código que escuta.
+7. ExecuteServiceRequest(key, args): roda uma ação da placa (`api: actions:`),
+   como `conversa_iniciar(chave)`, também confirmada por um Ping.
 
 Quadros: 0x01, tamanho (u16 big-endian) e o conteúdo. Depois do handshake,
 o conteúdo cifrado traz tipo (u16), tamanho (u16) e a mensagem protobuf.
@@ -62,6 +64,8 @@ BINARY_SENSOR_STATE = 21
 SENSOR_STATE = 25
 SUBSCRIBE_LOGS = 28
 SUBSCRIBE_LOGS_RESPONSE = 29
+LIST_ENTITIES_SERVICES = 41
+EXECUTE_SERVICE = 42
 LIST_ENTITIES_BUTTON = 61
 BUTTON_COMMAND = 62
 
@@ -101,12 +105,16 @@ def _varint(n: int) -> bytes:
 
 
 def pb_string(field: int, value: str) -> bytes:
-    data = value.encode()
-    return _varint(field << 3 | 2) + _varint(len(data)) + data
+    return pb_bytes(field, value.encode())
 
 
 def pb_uint(field: int, value: int) -> bytes:
     return _varint(field << 3 | 0) + _varint(value)
+
+
+def pb_bytes(field: int, data: bytes) -> bytes:
+    """Campo com mensagem dentro (ou bytes crus)."""
+    return _varint(field << 3 | 2) + _varint(len(data)) + data
 
 
 def pb_fixed32(field: int, value: int) -> bytes:
@@ -245,6 +253,7 @@ class Entities:
     buttons: dict[str, tuple[int, str]] = field(default_factory=dict)
     binary_sensors: dict[str, tuple[int, str]] = field(default_factory=dict)
     sensors: dict[str, tuple[int, str]] = field(default_factory=dict)  # numéricos (sinal do Wi-Fi...)
+    services: dict[str, int] = field(default_factory=dict)  # ações (`api: actions:`), por nome: chave
 
 
 class EspHome:
@@ -394,17 +403,20 @@ class EspHome:
             raise EspHomeError(f"a placa se apresentou como {self.name!r}, esperado {self.expected_name!r}")
 
     async def entities(self) -> Entities:
-        """Lista botões e sensores. Use antes de `run()`."""
+        """Lista botões, sensores e ações. Use antes de `run()`."""
         self._send_message(LIST_ENTITIES_REQUEST)
         await self._writer.drain()
         found = Entities()
         kinds = {LIST_ENTITIES_BUTTON: found.buttons, LIST_ENTITIES_BINARY_SENSOR: found.binary_sensors, LIST_ENTITIES_SENSOR: found.sensors}
         while True:
-            msg_type, data = await asyncio.wait_for(self._wait_for(LIST_ENTITIES_DONE, *kinds), self.timeout)
+            msg_type, data = await asyncio.wait_for(self._wait_for(LIST_ENTITIES_DONE, LIST_ENTITIES_SERVICES, *kinds), self.timeout)
             if msg_type == LIST_ENTITIES_DONE:
                 return found
             fields = pb_parse(data)
-            kinds[msg_type][_text(fields.get(1))] = (int(fields.get(2, 0)), _text(fields.get(3)))
+            if msg_type == LIST_ENTITIES_SERVICES:
+                found.services[_text(fields.get(1))] = int(fields.get(2, 0))
+            else:
+                kinds[msg_type][_text(fields.get(1))] = (int(fields.get(2, 0)), _text(fields.get(3)))
 
     async def subscribe_states(self) -> None:
         self._send_message(SUBSCRIBE_STATES)
@@ -437,6 +449,15 @@ class EspHome:
             await self.ping()
         except asyncio.TimeoutError as exc:
             raise EspHomeError("a placa não confirmou o comando") from exc
+
+    async def execute(self, key: int, *args: str) -> None:
+        """Roda a ação de chave `key` (argumentos de texto, na ordem) e espera a placa confirmar."""
+        data = pb_fixed32(1, key) + b"".join(pb_bytes(2, pb_string(4, arg)) for arg in args)
+        self._send_message(EXECUTE_SERVICE, data)
+        try:
+            await self.ping()
+        except asyncio.TimeoutError as exc:
+            raise EspHomeError("a placa não confirmou a ação") from exc
 
     async def run(self) -> None:
         """Lê a conexão até ela cair (sempre termina com EspHomeError)."""

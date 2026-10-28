@@ -40,17 +40,19 @@ Mesmo dentro da VPN, cada aparelho precisa ser aprovado individualmente:
 
 Exceções sem sessão: a "casca" do app (`/`, `/web/*`, `/sw.js`, manifesto), os endpoints de cadastro e entrada e os segmentos HLS do go2rtc que trazem um `id` de sessão válido. O player nativo do iPhone antigo busca esses segmentos sozinho e nem sempre manda o cookie. O `id` é aleatório (`crypto/rand`, ~47 bits) e só existe depois que um aparelho aprovado abriu o WebSocket do ao vivo.
 
-## Portaria (`esphome.py`, `porteiro.py`)
+## Portaria (`esphome.py`, `porteiro.py`, `conversa.py`)
 
-Uma placa ESP32-S3 com ESPHome no portão tem três relés (fechadura e as botoeiras das duas garagens), um sensor magnético por garagem e o botão da campainha. O tempo de cada pulso está gravado no firmware. O Zóio fala com ela pela API nativa do ESPHome (porta 6053), cifrada com Noise e uma chave de 32 bytes, implementada direto com `cryptography`.
+Uma placa ESP32-S3 com ESPHome no portão tem três relés (fechadura e as botoeiras das duas garagens), um sensor magnético por garagem, o botão da campainha, um microfone e um alto-falante. O tempo de cada pulso está gravado no firmware. O Zóio fala com ela pela API nativa do ESPHome (porta 6053), cifrada com Noise e uma chave de 32 bytes, implementada direto com `cryptography`.
 
 A conexão fica sempre aberta: o Zóio assina os estados da placa, recebe na hora a campainha, os sensores das garagens e o sinal do Wi-Fi, manda um ping a cada 20 s e reconecta sozinho com espera crescente. O estado de cada porta (aberta, em movimento, incerta depois de um Parar) e as ações permitidas são calculados no servidor e vão para o app por SSE (`portaria`).
 
-`POST /api/portaria/act` recebe `{door, action}` e exige sessão de um aparelho com a permissão `gate` e uma assinatura nova do aparelho sobre `zoio-portaria\n<desafio>\n<id>\n<porta>\n<ação>` (desafio de `POST /api/portaria/challenge`). O servidor só aceita a ação que o estado permite (fechar só com o sensor dizendo "aberta"; durante o movimento, só parar) e espera 5 s entre dois comandos da mesma porta. Cada comando, cada toque da campainha e cada mudança de sensor que não veio do Zóio vira um evento (`Portao`, `Garagem` ou `Campainha`) no SQLite, com uma foto do fluxo principal da câmera daquela porta (quadro do go2rtc). A campainha vai por push urgente para os aparelhos com a permissão; os comandos avisam os outros administradores. Detalhes em [porteiro.md](porteiro.md).
+`POST /api/portaria/act` recebe `{door, action}` e exige sessão de um aparelho com a permissão `gate` e uma assinatura nova do aparelho sobre `zoio-portaria\n<desafio>\n<id>\n<porta>\n<ação>` (desafio de `POST /api/portaria/challenge`). O servidor só aceita a ação que o estado permite (fechar só com o sensor dizendo "aberta"; durante o movimento, só parar) e espera 5 s entre dois comandos da mesma porta. Cada comando, cada toque da campainha e cada mudança de sensor que não veio do Zóio vira um evento (`Portao`, `Garagem` ou `Campainha`) no SQLite, com uma foto do fluxo principal da câmera daquela porta (quadro do go2rtc). A campainha vai por push urgente para os aparelhos com a permissão; os comandos avisam os outros administradores.
+
+A conversa usa o WebSocket `GET /api/portaria/conversa`: o app manda o desafio assinado (ação `conversar`), e o Zóio passa a ser a ponte entre o WebSocket e a placa, com áudio PCM de 16 kHz nos dois sentidos. Entre o Pi e a placa o áudio vai por UDP (porta 6054 da placa), com AES-128-GCM e uma chave sorteada a cada conversa, entregue pela API cifrada (`conversa_iniciar`). Uma conversa por vez; os outros aparelhos veem quem está falando. Detalhes em [porteiro.md](porteiro.md).
 
 ## Segurança
 
-- Nenhum serviço escuta fora do `127.0.0.1`. O único caminho de fora é a VPN (hoje, o Tailscale; alternativas em [acesso-remoto.md](acesso-remoto.md)).
+- Nenhum serviço escuta fora do `127.0.0.1`. O único caminho de fora é a VPN (hoje, o Tailscale; alternativas em [acesso-remoto.md](acesso-remoto.md)). A exceção é a conversa com o portão: enquanto ela dura, o Zóio abre um socket UDP ligado só ao endereço da placa, que descarta tudo o que não vier cifrado com a chave daquela conversa.
 - Cada aparelho precisa ser aprovado (seção acima). A VPN é a primeira trava, e a aprovação é a segunda.
 - A portaria exige, além disso, a permissão do aparelho e uma assinatura nova a cada comando, presa à porta e à ação. A placa não tem página web nem OTA.
 - `ZOIO_ALLOWED_USERS` restringe a logins específicos do Tailscale.
@@ -70,7 +72,6 @@ A conexão fica sempre aberta: o Zóio assina os estados da placa, recebe na hor
 
 ## Próximos passos
 
-1. Fase 2, parte 2: falar e ouvir pelo celular (áudio cifrado entre a placa e o Pi, e do Pi para o app pelo WebSocket).
 1. Fase 2: validar a portaria com a placa de verdade (ligação, gravação do firmware pelo Pi e o primeiro `zoio portao testar`).
 2. Miniatura nos alertas de movimento, com um quadro do go2rtc (a portaria já faz isso).
 3. Linha do tempo do dia por câmera, com marcações de movimento.

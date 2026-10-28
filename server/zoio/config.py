@@ -79,6 +79,7 @@ class Config:
     # Porteiro: placa ESPHome do portão (vazio = sem portaria)
     gate_host: str | None = None
     gate_port: int = 6053
+    gate_audio_port: int = 6054  # UDP da conversa (componente zoio_conversa)
     gate_key: str | None = None
     gate_name: str = "zoio-porteiro"
     gate_camera: int | None = None
@@ -171,6 +172,7 @@ def load(env_file: str | None = None) -> Config:
         push_contact=env.get("ZOIO_PUSH_CONTACT", "mailto:zoio@localhost"),
         gate_host=env.get("ZOIO_GATE_HOST") or None,
         gate_port=int(env.get("ZOIO_GATE_PORT", "6053")),
+        gate_audio_port=int(env.get("ZOIO_GATE_AUDIO_PORT", "6054")),
         gate_key=gate_key,
         gate_name=env.get("ZOIO_GATE_NAME", "zoio-porteiro"),
         gate_camera=camera_ref(env.get("ZOIO_GATE_CAMERA", "")),

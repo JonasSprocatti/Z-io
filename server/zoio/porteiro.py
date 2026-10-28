@@ -10,7 +10,9 @@ Nomes que a placa precisa ter (deploy/esphome/porteiro.yaml):
   abre, para ou fecha conforme o momento (igual ao controle remoto);
 - sensores `garagem_1_aberta`...: sensor magnético de cada garagem (opcional,
   mas sem ele a garagem só tem o comando genérico "acionar");
-- sensor `campainha`: botão de campainha.
+- sensor `campainha`: botão de campainha;
+- ações `conversa_iniciar(chave)` e `conversa_parar` (opcionais): microfone e
+  alto-falante no portão, com o áudio por UDP cifrado (ver conversa.py).
 
 As garagens podem ser acionadas por relé ou por rádio 433 MHz (código fixo):
 para o Zóio é igual, um botão por garagem. `radio()` escuta o receptor da
@@ -35,8 +37,9 @@ import aiohttp
 
 from .alarms import EventBus
 from .config import Config
-from .esphome import EspHome, EspHomeError
-from .store import BELL_KIND, EVENT_RETENTION_DAYS, GARAGE_KIND, GATE_KIND, Store
+from .conversa import Call
+from .esphome import Entities, EspHome, EspHomeError
+from .store import BELL_KIND, EVENT_RETENTION_DAYS, GARAGE_KIND, GATE_KIND, TALK_KIND, Store
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +49,8 @@ GATE_ID = "portao"
 GATE_BUTTON = "abrir_portao"
 DOORBELL = "campainha"
 WIFI_SIGNAL = "sinal_wifi"
+CALL_START = "conversa_iniciar"
+CALL_STOP = "conversa_parar"
 GARAGE_BUTTON = re.compile(r"^garagem_(\d{1,2})$")
 
 MIN_INTERVAL = 5  # segundos entre dois comandos na mesma porta (Parar não espera)
@@ -115,6 +120,9 @@ class Porteiro:
         self._keys: dict[str, int] = {}  # object_id -> chave da entidade na placa
         self._by_key: dict[int, str] = {}  # chave -> object_id dos sensores
         self._wifi_key: int | None = None
+        self._services: dict[str, int] = {}  # ações da placa: nome -> chave
+        self.call: Call | None = None  # conversa em andamento (só uma de cada vez)
+        self._call_info: dict = {}
         self.wifi_dbm: float | None = None
         self._synced: set[str] = set()  # sensores que já mandaram a leitura inicial
         self._bell = False
@@ -141,6 +149,8 @@ class Porteiro:
             "allowed": allowed,
             "camera": self.cfg.gate_camera,
             "doorbell": bool(self.info.get("doorbell")),
+            "talk": bool(self.info.get("talk")),
+            "talking": self._call_info.get("by") if self.call else None,
             "doors": [d.public() for d in self.doors.values()],
         }
 
@@ -170,18 +180,24 @@ class Porteiro:
             await asyncio.sleep(delay)
             delay = min(delay * 2, RETRY_MAX)
 
-    async def _setup(self, board: EspHome) -> None:
-        entities = await board.entities()
+    def _learn(self, board: EspHome, entities: Entities) -> None:
+        """Guarda o que a placa tem (botões, sensores e ações)."""
         self._keys = {obj: key for obj, (key, _) in {**entities.buttons, **entities.binary_sensors}.items()}
-        self._by_key = {key: obj for obj, (key, _) in entities.binary_sensors.items()}
-        self._wifi_key = entities.sensors.get(WIFI_SIGNAL, (None,))[0]
-        self._synced = set()
+        self._services = dict(entities.services)
         self.doors = self._build_doors(set(entities.buttons), set(entities.binary_sensors))
         self.info = {
             "name": board.name, "mac": board.mac, "version": board.server_info,
             "doorbell": DOORBELL in entities.binary_sensors,
+            "talk": CALL_START in entities.services,
             "buttons": sorted(entities.buttons), "sensors": sorted(entities.binary_sensors),
         }
+
+    async def _setup(self, board: EspHome) -> None:
+        entities = await board.entities()
+        self._learn(board, entities)
+        self._by_key = {key: obj for obj, (key, _) in entities.binary_sensors.items()}
+        self._wifi_key = entities.sensors.get(WIFI_SIGNAL, (None,))[0]
+        self._synced = set()
         board.on_state = self._on_state
         board.on_value = self._on_value
         await board.subscribe_states()
@@ -221,7 +237,8 @@ class Porteiro:
         self.store.set(CACHE_KEY, json.dumps({"info": self.info, "buttons": self.info["buttons"], "sensors": self.info["sensors"]}))
 
     def _publish_state(self) -> None:
-        self.bus.publish({"type": "portaria", "online": self.online, "doors": [d.public() for d in self.doors.values()]})
+        public = self.public()
+        self.bus.publish({"type": "portaria", **{k: public[k] for k in ("online", "talk", "talking", "doors")}})
 
     # ---------------------------------------------------------------- sensores
 
@@ -329,18 +346,73 @@ class Porteiro:
             door.expect_until = now + self.cfg.garage_travel + 5
             door.unsure = False
 
+    # ---------------------------------------------------------------- conversa
+
+    async def start_call(self, by: str, device_id: str | None, on_audio) -> Call:
+        """Liga o microfone e o alto-falante do portão. Só uma conversa de cada vez.
+
+        Devolve a conversa já respondida pela placa; o áudio dela chega em
+        `on_audio(pcm)`. Termine sempre com `end_call()`."""
+        if not self.enabled:
+            raise GateError(self.cfg.gate_error or "portaria não configurada")
+        if self.call is not None:
+            raise GateBusy(f"{self._call_info.get('by') or 'Outra pessoa'} já está falando com o portão")
+        board = self.board
+        if board is None:
+            raise EspHomeError(f"placa do porteiro desconectada ({self.last_error or 'sem resposta'})")
+        start = self._services.get(CALL_START)
+        if start is None:
+            raise GateError("a placa do porteiro ainda não tem a conversa (grave o firmware novo)")
+
+        call = Call(self.cfg.gate_host, self.cfg.gate_audio_port, on_audio)
+        self.call = call
+        self._call_info = {"by": by, "device_id": device_id, "photo": asyncio.create_task(self._photo(self.cfg.gate_camera))}
+        try:
+            try:
+                await call.open()
+            except OSError as exc:
+                raise EspHomeError(f"não consegui abrir o áudio da placa: {exc.strerror or exc}") from exc
+            async with self._lock:
+                await board.execute(start, call.key.hex())
+            call.begin()
+            reason = await call.ready()
+            if reason:
+                raise EspHomeError(reason)
+        except BaseException as exc:
+            await self.end_call(call, error=str(exc) if isinstance(exc, (EspHomeError, GateError)) else "cancelada")
+            raise
+        log.info("porteiro: conversa no portão com %s", by)
+        self._publish_state()
+        return call
+
+    async def end_call(self, call: Call, reason: str | None = None, error: str | None = None) -> dict | None:
+        """Encerra a conversa e registra o evento (com a foto do começo)."""
+        if self.call is not call:
+            return None
+        info, self.call, self._call_info = self._call_info, None, {}
+        await call.close()
+        stop, board = self._services.get(CALL_STOP), self.board
+        if stop is not None and board is not None:
+            # Garante que a placa desligou o microfone, mesmo se o aviso por UDP se perder.
+            with contextlib.suppress(EspHomeError, OSError, asyncio.TimeoutError):
+                await board.execute(stop)
+        image = await info["photo"]
+        detail = {"door": GATE_ID, "by": info["by"], "device_id": info["device_id"], "seconds": round(call.seconds) if call.answered else 0,
+                  "reason": reason, "error": error, "photo": bool(image)}
+        event = self._add_event(self.cfg.gate_camera, TALK_KIND, FAILED if error else "Conversou", detail, image)
+        if error:
+            log.warning("porteiro: conversa com %s falhou: %s", info["by"], error)
+        else:
+            log.info("porteiro: conversa com %s encerrada (%s, %d s)", info["by"], reason or "encerrada", detail["seconds"])
+        self.bus.publish({"type": "porta", **event})
+        self._publish_state()
+        return event
+
     @contextlib.asynccontextmanager
     async def session(self):
         """Conexão curta, para a linha de comando: lista as portas e deixa mandar comandos."""
         async with self._board() as board:
-            entities = await board.entities()
-            self._keys = {obj: key for obj, (key, _) in {**entities.buttons, **entities.binary_sensors}.items()}
-            self.doors = self._build_doors(set(entities.buttons), set(entities.binary_sensors))
-            self.info = {
-                "name": board.name, "mac": board.mac, "version": board.server_info,
-                "doorbell": DOORBELL in entities.binary_sensors,
-                "buttons": sorted(entities.buttons), "sensors": sorted(entities.binary_sensors),
-            }
+            self._learn(board, await board.entities())
             self.board, self.online = board, True
             try:
                 yield self

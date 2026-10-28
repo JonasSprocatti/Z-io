@@ -1,11 +1,13 @@
 # Placa do porteiro do Zóio: ESP32-S3 no portão.
 #
-# Faz tudo o que fica no portão: campainha, fechadura do portão de pedestre e
-# as duas garagens, com o estado aberta/fechada de cada uma. A conversa
-# (microfone e alto-falante) entra na parte 2.
+# Faz tudo o que fica no portão: campainha, conversa (microfone e
+# alto-falante), fechadura do portão de pedestre e as duas garagens, com o
+# estado aberta/fechada de cada uma.
 #
 # Ligação (ESP32-S3-DevKitC-1, tudo na fileira esquerda; esquema completo em
 # docs/porteiro.md):
+#   GPIO4, GPIO5, GPIO6  → microfone INMP441: SCK, WS, SD (L/R no GND, VDD no 3V3)
+#   GPIO7, GPIO15, GPIO16 → amplificador MAX98357A: BCLK, LRC, DIN (VIN no 5V)
 #   GPIO10 → IN1 do módulo relé: fechadura do portão
 #   GPIO17 ← botão da campainha (o outro fio no GND)
 #   GPIO8  ← DATA do receptor de rádio 433 MHz (RXB6, no 3V3), se houver
@@ -19,7 +21,9 @@
 # - sem servidor web, sem atualização pela rede (OTA) e sem ponto de acesso de
 #   emergência: ninguém por perto consegue reconfigurar ou regravar a placa.
 #   Para atualizar, ela volta para o USB do Pi;
-# - o tempo de cada pulso está gravado aqui: nenhum comando segura um relé ligado.
+# - o tempo de cada pulso está gravado aqui: nenhum comando segura um relé ligado;
+# - a conversa só liga o microfone quando o Zóio pede, com uma chave nova a
+#   cada vez, e desliga sozinha sem sinal do Zóio ou depois do tempo máximo.
 #
 # Os segredos (Wi-Fi, chave e códigos de rádio) ficam num secrets.yaml gerado
 # no Pi, fora do Git.
@@ -29,6 +33,7 @@ substitutions:
   pulso_portao: 1s        # quanto tempo a fechadura recebe energia
   pulso_garagem: 700ms    # quanto tempo a botoeira (ou o botão do controle extra) fica apertada
   sensor_invertido: "false"  # "true" se o sensor com fio fechar o contato com a garagem aberta
+  ganho_microfone: "4"     # volume do microfone na conversa (1 a 64); aumente se ficar baixo
 
 esphome:
   name: zoio-porteiro
@@ -52,6 +57,16 @@ api:
   encryption:
     key: !secret api_key
   reboot_timeout: 0s  # sem o Zóio por perto, a placa continua de pé
+  actions:
+    # O Zóio chama estas duas ações para abrir e fechar a conversa.
+    - action: conversa_iniciar
+      variables:
+        chave: string  # 16 bytes em hexadecimal, nova a cada conversa
+      then:
+        - lambda: "id(conversa).start(chave);"
+    - action: conversa_parar
+      then:
+        - lambda: "id(conversa).stop();"
 
 output:
   - platform: gpio
@@ -85,6 +100,49 @@ sensor:
   - platform: wifi_signal
     name: "Sinal Wi-Fi"  # o Zóio mostra em Ajustes: ajuda a saber se precisa de repetidor
     update_interval: 60s
+
+# Conversa: microfone e alto-falante, cada um no seu barramento I2S.
+external_components:
+  - source: { type: local, path: components }
+    components: [zoio_conversa]
+
+i2s_audio:
+  - id: i2s_microfone
+    i2s_bclk_pin: GPIO4
+    i2s_lrclk_pin: GPIO5
+  - id: i2s_alto_falante
+    i2s_bclk_pin: GPIO7
+    i2s_lrclk_pin: GPIO15
+
+microphone:
+  - platform: i2s_audio
+    id: microfone
+    i2s_audio_id: i2s_microfone
+    adc_type: external
+    i2s_din_pin: GPIO6
+    pdm: false
+    channel: left  # L/R do INMP441 no GND
+    sample_rate: 16000
+    bits_per_sample: 32bit
+
+speaker:
+  - platform: i2s_audio
+    id: alto_falante
+    i2s_audio_id: i2s_alto_falante
+    dac_type: external
+    i2s_dout_pin: GPIO16
+    channel: mono
+    sample_rate: 16000
+    bits_per_sample: 16bit
+
+zoio_conversa:
+  id: conversa
+  microphone:
+    microphone: microfone
+    gain_factor: ${ganho_microfone}
+  speaker: alto_falante
+  port: 6054
+  tempo_maximo: 10min
 
 # Receptor de rádio 433 MHz (opcional). Escuta o controle das garagens, para
 # aprender o código (`zoio portao radio` mostra o que chegar), e os sensores

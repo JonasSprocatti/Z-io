@@ -73,7 +73,7 @@ Para atualizar: `git pull && sudo ./deploy/install.sh`.
 
 ## Portaria
 
-Com uma placa ESP32 no portão (ESPHome), o Zóio vira o porteiro da casa. Quem tem a permissão de portaria recebe uma notificação quando tocam a campainha, que abre a câmera do portão ao vivo. No botão **Portaria** do app, vê a câmera, abre o portão e abre ou fecha as garagens, que mostram se estão abertas ou fechadas. Os comandos precisam ser segurados até completar o círculo, fechar uma garagem exige ver ela ao vivo, e tudo fica em Alertas com quem fez e uma foto. Falar e ouvir pelo celular é a próxima parte.
+Com uma placa ESP32 no portão (ESPHome), o Zóio vira o porteiro da casa. Quem tem a permissão de portaria recebe uma notificação quando tocam a campainha, que abre a câmera do portão ao vivo. No botão **Portaria** do app, vê a câmera, abre o portão e abre ou fecha as garagens, que mostram se estão abertas ou fechadas. Os comandos precisam ser segurados até completar o círculo, fechar uma garagem exige ver ela ao vivo, e tudo fica em Alertas com quem fez e uma foto. Também dá para conversar com quem está no portão, no estilo rádio: segure para falar e solte para ouvir, uma pessoa por vez.
 
 Sem a placa configurada, nada disso aparece. Peças, ligação, programação da placa e configuração estão em [docs/porteiro.md](docs/porteiro.md).
 
@@ -103,5 +103,4 @@ Os testes usam um DVR simulado (`tests/fake_dvr.py`), que fala DVRIP, uma placa 
 
 ## Próximas fases
 
-- Portaria, parte 2: falar e ouvir pelo celular, no estilo "aperte para falar".
-- Portaria: falta a placa. O software da parte 1 está pronto e espera as peças e a confirmação da ligação.
+- Portaria: falta a placa. O software está pronto e espera as peças e a confirmação da ligação.

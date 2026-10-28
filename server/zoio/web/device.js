@@ -110,10 +110,20 @@ export async function challenge() {
   return ch.status === 200 ? ch.data.nonce : null;
 }
 
+async function signPortaria(rec, nonce, door, action) {
+  const message = new TextEncoder().encode(`zoio-portaria\n${nonce}\n${rec.id}\n${door}\n${action}`);
+  return b64u(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, rec.keyPair.privateKey, message));
+}
+
 export async function portaria(rec, door, action, nonce) {
   nonce = nonce ?? await challenge();
   if (!nonce) return { status: 403, data: { error: 'sem permissão de portaria' } };
-  const message = new TextEncoder().encode(`zoio-portaria\n${nonce}\n${rec.id}\n${door}\n${action}`);
-  const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, rec.keyPair.privateKey, message);
-  return post('/api/portaria/act', { door, action, nonce, signature: b64u(signature) });
+  return post('/api/portaria/act', { door, action, nonce, signature: await signPortaria(rec, nonce, door, action) });
+}
+
+// Primeira mensagem da conversa com o portão (o mesmo tipo de assinatura, com o comando "conversar").
+export async function talkHello(rec) {
+  const nonce = await challenge();
+  if (!nonce) return null;
+  return { type: 'iniciar', nonce, signature: await signPortaria(rec, nonce, 'portao', 'conversar') };
 }
