@@ -22,6 +22,28 @@ def test_key_validation():
             eh.decode_key(bad)
 
 
+def test_object_id_follows_esphome():
+    # mesma regra do ESPHome 2026 (helpers.py: sanitize(snake_case(nome)))
+    assert eh.object_id("Abrir portao") == "abrir_portao"
+    assert eh.object_id("Garagem 1 aberta") == "garagem_1_aberta"
+    assert eh.object_id("Sinal Wi-Fi") == "sinal_wi-fi"
+    assert eh.object_id("Portão") == "port_o"
+
+
+@pytest.mark.parametrize("send_object_id", [False, True], ids=["esphome-2026", "firmware-antigo"])
+async def test_entities_by_object_id(send_object_id):
+    """A placa nova manda o object_id vazio; a antiga mandava pronto. Os dois dão o mesmo resultado."""
+    board = await FakeEspHome(KEY, send_object_id=send_object_id).start()
+    try:
+        async with eh.EspHome("127.0.0.1", board.port, KEY) as dev:
+            ents = await dev.entities()
+    finally:
+        await board.stop()
+    assert set(ents.buttons) == {"abrir_portao", "garagem_1", "garagem_2"}
+    assert set(ents.binary_sensors) == {"campainha", "garagem_1_aberta"}
+    assert ents.sensors == {"sinal_wi-fi": (7, "Sinal Wi-Fi")}
+
+
 async def test_press_button_over_encrypted_api():
     board = await FakeEspHome(KEY).start()
     try:

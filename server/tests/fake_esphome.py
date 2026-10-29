@@ -22,7 +22,7 @@ STRING_ARG = 3  # ServiceArgType.STRING
 
 
 class FakeEspHome:
-    def __init__(self, key: str, name: str = "zoio-porteiro", buttons: dict | None = None, sensors: dict | None = None, services: dict | None = None, encrypted: bool = True):
+    def __init__(self, key: str, name: str = "zoio-porteiro", buttons: dict | None = None, sensors: dict | None = None, services: dict | None = None, encrypted: bool = True, send_object_id: bool = False):
         self.psk = eh.decode_key(key)
         self.name = name
         self.buttons = dict(PORTEIRO_BUTTONS if buttons is None else buttons)
@@ -32,6 +32,7 @@ class FakeEspHome:
         self.on_execute = None  # chamado com (nome, argumentos), como o código da ação na placa
         self.states = {obj: False for obj in self.sensors}
         self.encrypted = encrypted
+        self.send_object_id = send_object_id  # firmware antigo (antes de 2026) mandava o object_id
         self.pressed: list[int] = []
         self.hello: dict | None = None
         self.pongs = 0
@@ -121,11 +122,13 @@ class FakeEspHome:
                     send_msg(eh.HELLO_RESPONSE, eh.pb_uint(1, 1) + eh.pb_uint(2, 10) + eh.pb_string(3, "fake 2026.10") + eh.pb_string(4, self.name))
                     send_msg(eh.PING_REQUEST)  # a placa real manda ping de tempos em tempos
                 elif msg_type == eh.LIST_ENTITIES_REQUEST:
-                    send_msg(eh.LIST_ENTITIES_SENSOR, eh.pb_string(1, "sinal_wifi") + eh.pb_fixed32(2, 7) + eh.pb_string(3, "Sinal Wi-Fi"))
+                    # Como o ESPHome 2026: object_id vazio, o cliente calcula pelo nome
+                    oid = (lambda o: o) if self.send_object_id else (lambda o: "")
+                    send_msg(eh.LIST_ENTITIES_SENSOR, eh.pb_string(1, oid("sinal_wi-fi")) + eh.pb_fixed32(2, 7) + eh.pb_string(3, "Sinal Wi-Fi"))
                     for object_id, (key, name) in self.sensors.items():
-                        send_msg(eh.LIST_ENTITIES_BINARY_SENSOR, eh.pb_string(1, object_id) + eh.pb_fixed32(2, key) + eh.pb_string(3, name))
+                        send_msg(eh.LIST_ENTITIES_BINARY_SENSOR, eh.pb_string(1, oid(object_id)) + eh.pb_fixed32(2, key) + eh.pb_string(3, name))
                     for object_id, (key, name) in self.buttons.items():
-                        send_msg(eh.LIST_ENTITIES_BUTTON, eh.pb_string(1, object_id) + eh.pb_fixed32(2, key) + eh.pb_string(3, name))
+                        send_msg(eh.LIST_ENTITIES_BUTTON, eh.pb_string(1, oid(object_id)) + eh.pb_fixed32(2, key) + eh.pb_string(3, name))
                     for name, (key, args) in self.services.items():
                         arg_fields = b"".join(eh.pb_bytes(3, eh.pb_string(1, arg) + eh.pb_uint(2, STRING_ARG)) for arg in args)
                         send_msg(eh.LIST_ENTITIES_SERVICES, eh.pb_string(1, name) + eh.pb_fixed32(2, key) + arg_fields)

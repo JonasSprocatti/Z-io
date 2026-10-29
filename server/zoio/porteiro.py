@@ -48,7 +48,7 @@ RC_SWITCH = re.compile(r"Received RCSwitch Raw: protocol=(\d+) data='([01]+)'")
 GATE_ID = "portao"
 GATE_BUTTON = "abrir_portao"
 DOORBELL = "campainha"
-WIFI_SIGNAL = "sinal_wifi"
+WIFI_SIGNAL = "sinal_wi-fi"  # "Sinal Wi-Fi" no firmware
 CALL_START = "conversa_iniciar"
 CALL_STOP = "conversa_parar"
 GARAGE_BUTTON = re.compile(r"^garagem_(\d{1,2})$")
