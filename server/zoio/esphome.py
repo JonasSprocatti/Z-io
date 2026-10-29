@@ -32,6 +32,7 @@ import base64
 import collections
 import hashlib
 import hmac
+import re
 import secrets
 import struct
 import time
@@ -165,6 +166,15 @@ def pb_parse(data: bytes) -> dict[int, object]:
 
 def _text(value: object) -> str:
     return value.decode("utf-8", "replace") if isinstance(value, (bytes, bytearray)) else ""
+
+
+def object_id(name: str) -> str:
+    """O nome interno que o ESPHome tira do nome da entidade ("Sinal Wi-Fi" -> "sinal_wi-fi").
+
+    Desde 2026 a placa manda o object_id vazio e cada cliente calcula, com a
+    mesma regra do ESPHome (snake_case e depois sanitize).
+    """
+    return re.sub(r"[^a-zA-Z0-9-_]", "_", name.replace(" ", "_").lower())
 
 
 # ---------------------------------------------------------------- Noise
@@ -416,7 +426,8 @@ class EspHome:
             if msg_type == LIST_ENTITIES_SERVICES:
                 found.services[_text(fields.get(1))] = int(fields.get(2, 0))
             else:
-                kinds[msg_type][_text(fields.get(1))] = (int(fields.get(2, 0)), _text(fields.get(3)))
+                name = _text(fields.get(3))
+                kinds[msg_type][_text(fields.get(1)) or object_id(name)] = (int(fields.get(2, 0)), name)
 
     async def subscribe_states(self) -> None:
         self._send_message(SUBSCRIBE_STATES)

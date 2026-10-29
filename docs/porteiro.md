@@ -105,7 +105,7 @@ Tudo vai na fileira esquerda do ESP32-S3 DevKitC-1 (olhando por cima, com o USB 
 - **Sensores com fio:** com a garagem fechada, o ímã fica encostado e o contato fecha. Se o seu sensor fizer o contrário, mude `sensor_invertido` para `"true"`.
 - **Antenas de 433 MHz:** um fio rígido de 17,3 cm em cada módulo de rádio.
 
-Se a voz chegar baixa ou estourada no celular, ajuste `ganho_microfone` (padrão 4). Os tempos (`pulso_portao` e `pulso_garagem`) e essas opções ficam no topo de [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml). Os nomes dos botões, sensores e ações não podem mudar, porque são eles que o Zóio procura: `abrir_portao`, `garagem_1`, `garagem_2`, `garagem_1_aberta`, `garagem_2_aberta`, `campainha`, `sinal_wifi`, `conversa_iniciar` e `conversa_parar`.
+Se a voz chegar baixa ou estourada no celular, ajuste `ganho_microfone` (padrão 4). Os tempos (`pulso_portao` e `pulso_garagem`) e essas opções ficam no topo de [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml). Os nomes dos botões, sensores e ações não podem mudar, porque são eles que o Zóio procura: `abrir_portao`, `garagem_1`, `garagem_2`, `garagem_1_aberta`, `garagem_2_aberta`, `campainha`, `sinal_wi-fi`, `conversa_iniciar` e `conversa_parar`.
 
 ## Programação da placa
 
