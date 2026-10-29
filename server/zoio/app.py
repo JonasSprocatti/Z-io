@@ -208,6 +208,7 @@ async def api_config(request: web.Request) -> web.Response:
             "version": __version__,
             "user": current_user(request),
             "cameras": [public_camera(c) for c in cfg.cameras],
+            "aspect": cfg.video_aspect,
             "push_key": notifier.vapid.public_key if notifier else None,
             "device_approval": cfg.device_approval,
             "device": public_device(current_device(request), current_device(request)["id"]) if current_device(request) else None,

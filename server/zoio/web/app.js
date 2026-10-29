@@ -164,7 +164,7 @@ function makeStream(src, { controls }) {
   v.visibilityCheck = true; // para quando o app vai para segundo plano
   v.visibilityThreshold = 0.01; // e quando a câmera sai da tela (rolagem)
   queueMicrotask(() => {
-    if (v.video) { v.video.controls = controls; v.video.muted = true; }
+    if (v.video) { v.video.controls = controls; v.video.muted = true; guardNativeFullscreen(v.video); }
     v.src = `/live/ws?src=${encodeURIComponent(src)}`;
   });
   return v;
@@ -216,7 +216,91 @@ async function renderSingle(number) {
   $('#single-name').textContent = cam.name;
   $('#single-rec').onclick = () => { location.hash = `#gravacoes?cam=${cam.number}`; };
   const box = $('#single-video');
-  box.replaceChildren(makeStream(cam.main, { controls: true }));
+  box.replaceChildren(makeStream(cam.main, { controls: true }), fullscreenButton(box));
+  syncFullscreenButtons();
+}
+
+// ------------------------------------------------------------------ proporção e tela cheia
+
+// O DVR manda a imagem "espremida" (sub 352x240, canais em 1080N 960x1080) e a
+// câmera é 16:9: as caixas de vídeo têm a proporção do servidor e o vídeo estica até ela.
+function applyAspect(aspect) {
+  const [w, h] = (aspect || '16:9').split(':').map(Number);
+  const root = document.documentElement.style;
+  root.setProperty('--aspect', `${w} / ${h}`);
+  root.setProperty('--aspect-n', (w / h).toFixed(4));
+  document.body.classList.toggle('stretch', !!aspect);
+}
+
+const fsElement = () => document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
+const isFull = (box) => fsElement() === box || box.classList.contains('pseudo-full');
+
+// A tela cheia é da caixa, não do <video>, para manter a proporção certa.
+// O iPhone não tem tela cheia de elemento: lá a caixa ocupa a janela e basta deitar o celular.
+async function enterFullscreen(box) {
+  const request = box.requestFullscreen ?? box.webkitRequestFullscreen;
+  if (request) {
+    try {
+      await request.call(box, { navigationUI: 'hide' });
+      screen.orientation?.lock?.('landscape').catch(() => {}); // só o Android deixa
+      return;
+    } catch { /* sem permissão: usa a janela toda */ }
+  }
+  box.classList.add('pseudo-full');
+  syncFullscreenButtons();
+}
+
+function exitFullscreen() {
+  if (fsElement()) (document.exitFullscreen ?? document.webkitExitFullscreen).call(document)?.catch?.(() => {});
+  document.querySelector('.pseudo-full')?.classList.remove('pseudo-full');
+  syncFullscreenButtons();
+}
+
+function fullscreenButton(box) {
+  return el('button', { class: 'fs-btn', type: 'button', 'aria-label': 'Tela cheia', onclick: (e) => {
+    e.stopPropagation();
+    isFull(box) ? exitFullscreen() : enterFullscreen(box);
+  } }, icon('expand'));
+}
+
+function syncFullscreenButtons() {
+  for (const box of document.querySelectorAll('.vbox')) {
+    const btn = box.querySelector('.fs-btn');
+    if (!btn) continue;
+    const full = isFull(box);
+    btn.setAttribute('aria-label', full ? 'Sair da tela cheia' : 'Tela cheia');
+    btn.querySelector('use').setAttribute('href', full ? '#i-shrink' : '#i-expand');
+  }
+}
+
+// O botão de tela cheia do próprio <video> mostraria a imagem espremida: troca pela caixa.
+function guardNativeFullscreen(video) {
+  video.setAttribute('controlslist', 'nofullscreen'); // Chrome e Android escondem o botão
+  video.addEventListener('webkitbeginfullscreen', () => { // iPhone
+    const box = video.closest('.vbox');
+    if (!box) return;
+    video.webkitExitFullscreen();
+    enterFullscreen(box);
+    setTimeout(() => video.play().catch(() => {}), 300);
+  });
+}
+
+function setupFullscreen() {
+  const changed = () => {
+    const fs = fsElement();
+    const box = fs?.tagName === 'VIDEO' ? fs.closest('.vbox') : null;
+    if (box) { // Firefox, que não esconde o botão
+      (document.exitFullscreen ?? document.webkitExitFullscreen).call(document)?.then?.(() => enterFullscreen(box), () => {});
+      return;
+    }
+    if (!fs) screen.orientation?.unlock?.();
+    syncFullscreenButtons();
+  };
+  document.addEventListener('fullscreenchange', changed);
+  document.addEventListener('webkitfullscreenchange', changed);
+  const player = $('#player-box');
+  player.append(fullscreenButton(player));
+  guardNativeFullscreen($('#player-video'));
 }
 
 function flashMotion(camera) {
@@ -261,7 +345,7 @@ async function openClip(item) {
   const video = $('#player-video');
   const link = $('#player-download');
   box.hidden = false;
-  video.hidden = true;
+  $('#player-box').hidden = true;
   link.hidden = true;
   video.removeAttribute('src');
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -281,7 +365,7 @@ async function openClip(item) {
     if (job.state === 'pronto') {
       status.querySelector('.progress')?.remove();
       video.src = job.url;
-      video.hidden = false;
+      $('#player-box').hidden = false;
       link.href = `${job.url}?download=1`;
       link.hidden = false;
       video.play().catch(() => {});
@@ -1072,12 +1156,14 @@ function route() {
   if (path.startsWith('camera/')) view = 'single';
   if (path === 'portaria') openGateSheet(params.get('porta') || 'portao');
 
-  // Sair da tela cheia desliga o fluxo principal (o mais pesado).
+  if (view !== currentView) exitFullscreen();
+  // Sair da câmera desliga o fluxo principal (o mais pesado).
   if (currentView === 'single' && view !== 'single') $('#single-video').replaceChildren();
   currentView = view;
   for (const sec of document.querySelectorAll('.view')) sec.hidden = sec.id !== `view-${view}`;
   for (const a of document.querySelectorAll('.tabs a')) a.classList.toggle('on', a.dataset.view === view || (view === 'single' && a.dataset.view === 'live'));
   document.body.classList.toggle('live', view === 'live');
+  document.body.classList.toggle('single', view === 'single');
 
   if (view === 'live') renderGrid();
   if (view === 'single') renderSingle(Number(path.split('/')[1]));
@@ -1097,6 +1183,7 @@ async function init() {
     return;
   }
   setCameras(state.config.cameras);
+  applyAspect(state.config.aspect);
   hideSplash();
   setCols(store.get('cols', window.innerWidth >= 900 ? 4 : 2));
   $('#layout-picker').addEventListener('click', (e) => { if (e.target.dataset.cols) setCols(Number(e.target.dataset.cols)); });
@@ -1104,6 +1191,7 @@ async function init() {
   $('#rec-form').addEventListener('submit', (e) => { e.preventDefault(); searchRecordings(); });
   $('#alert-more').onclick = () => loadAlerts(true);
   setupGate();
+  setupFullscreen();
   $('#gate-btn').onclick = () => openGateSheet();
   $('#gate-close').onclick = closeGateSheet;
   $('#gate').addEventListener('click', (e) => { if (e.target.id === 'gate') closeGateSheet(); });
@@ -1116,7 +1204,8 @@ async function init() {
   $('#lightbox').onclick = () => { $('#lightbox').hidden = true; };
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!$('#lightbox').hidden) $('#lightbox').hidden = true;
+    if ($('.pseudo-full')) exitFullscreen();
+    else if (!$('#lightbox').hidden) $('#lightbox').hidden = true;
     else if (!$('#gate').hidden) closeGateSheet();
   });
   $('#gate-test').onclick = async () => {

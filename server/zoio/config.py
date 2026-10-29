@@ -80,6 +80,9 @@ class Config:
     notify_channels: set[int] = field(default_factory=set)  # vazio = todas
     notify_cooldown: int = 300
     cache_max_mb: int = 2048
+    # Proporção da imagem na tela. O DVR manda o sub (352x240) e os canais em
+    # 1080N (960x1080) "espremidos", e a câmera é 16:9. None = como chega.
+    video_aspect: str | None = "16:9"
     push_contact: str = "mailto:zoio@localhost"
     # Porteiro: placa ESPHome do portão (vazio = sem portaria)
     gate_host: str | None = None
@@ -124,6 +127,16 @@ def _flag(raw: str) -> bool:
 
 def _int_set(raw: str) -> set[int]:
     return {int(x) for x in raw.replace(" ", "").split(",") if x}
+
+
+def _aspect(raw: str) -> str | None:
+    raw = raw.strip().lower()
+    if raw == "original":
+        return None
+    w, sep, h = raw.partition(":")
+    if not (sep and w.isdigit() and h.isdigit() and int(w) and int(h)):
+        raise SystemExit(f"ZOIO_VIDEO_ASPECT inválido: {raw!r} (use 16:9, 4:3 ou original)")
+    return f"{int(w)}:{int(h)}"
 
 
 def load(env_file: str | None = None) -> Config:
@@ -174,6 +187,7 @@ def load(env_file: str | None = None) -> Config:
         notify_channels=_int_set(env.get("ZOIO_NOTIFY_CHANNELS", "")),
         notify_cooldown=int(env.get("ZOIO_NOTIFY_COOLDOWN", "300")),
         cache_max_mb=int(env.get("ZOIO_CACHE_MAX_MB", "2048")),
+        video_aspect=_aspect(env.get("ZOIO_VIDEO_ASPECT") or "16:9"),
         push_contact=env.get("ZOIO_PUSH_CONTACT", "mailto:zoio@localhost"),
         gate_host=env.get("ZOIO_GATE_HOST") or None,
         gate_port=int(env.get("ZOIO_GATE_PORT", "6053")),

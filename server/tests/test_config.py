@@ -1,3 +1,5 @@
+import pytest
+
 from zoio import config
 
 
@@ -25,3 +27,12 @@ def test_unquoted_value_keeps_hash_without_space():
     assert config._env_value("abc #def") == "abc"
     assert config._env_value('"a b" # c') == "a b"
     assert config._env_value("") == ""
+
+
+def test_video_aspect():
+    assert config._aspect("16:9") == "16:9"
+    assert config._aspect(" 4:3 ") == "4:3"
+    assert config._aspect("Original") is None
+    for bad in ("16x9", "0:9", "largo"):
+        with pytest.raises(SystemExit):
+            config._aspect(bad)
