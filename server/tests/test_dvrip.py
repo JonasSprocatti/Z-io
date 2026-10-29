@@ -63,12 +63,13 @@ async def test_download_becomes_playable_mp4(make_cfg, hevc_es):
             await asyncio.sleep(0.05)
         assert job.state == "pronto", job.error
         probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_name,codec_tag_string,nb_frames", "-of", "json", str(clips.path(job.id))],
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_name,codec_tag_string,nb_frames,display_aspect_ratio", "-of", "json", str(clips.path(job.id))],
             capture_output=True, check=True, text=True,
         )
         stream = json.loads(probe.stdout)["streams"][0]
         assert stream["codec_name"] == "hevc" and stream["codec_tag_string"] == "hvc1"
         assert int(stream["nb_frames"]) == 30
+        assert stream["display_aspect_ratio"] == "16:9"  # o original é 320x240
         # pedir de novo usa o cache
         assert clips.request(1, "/idea0/x.h264", "2026-10-26 12:00:00", "2026-10-26 12:00:02", None).state == "pronto"
     finally:

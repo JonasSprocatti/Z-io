@@ -111,7 +111,7 @@ class Clips:
                 if info.video_frames == 0:
                     raise RuntimeError("o DVR não enviou vídeo para esse trecho")
                 job.state = "convertendo"
-                await remux(raw, out, info.codec or "hevc", info.fps or 15)
+                await remux(raw, out, info.codec or "hevc", info.fps or 15, self.cfg.video_aspect)
                 job.state = "pronto"
                 self.prune()
         except Exception as exc:
@@ -132,12 +132,14 @@ class Clips:
             self.jobs.pop(victim.stem, None)
 
 
-async def remux(src: Path, dst: Path, codec: str, fps: int) -> None:
+async def remux(src: Path, dst: Path, codec: str, fps: int, aspect: str | None = None) -> None:
     fmt = "hevc" if codec == "hevc" else "h264"
     tmp = dst.with_suffix(".part.mp4")
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-fflags", "+genpts", "-r", str(fps), "-f", fmt, "-i", str(src), "-c", "copy"]
     if fmt == "hevc":
         cmd += ["-tag:v", "hvc1"]  # exigido pelo Safari/iOS para tocar H.265
+    if aspect:
+        cmd += ["-aspect", aspect]  # só marca no MP4 como mostrar; o VLC e o celular respeitam
     cmd += ["-movflags", "+faststart", str(tmp)]
     proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
     _, err = await proc.communicate()

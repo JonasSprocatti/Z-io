@@ -14,6 +14,9 @@
   --radius: 12px;
   --top-h: 58px;
   --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  /* proporção das câmeras (o app troca pela do servidor); --aspect-n é a mesma, em número */
+  --aspect: 16 / 9;
+  --aspect-n: 1.7778;
   color-scheme: dark;
 }
 
@@ -111,7 +114,7 @@ main { padding: 14px 16px; }
 
 .grid { display: grid; gap: 8px; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr)); }
 .tile {
-  position: relative; aspect-ratio: 16 / 9; overflow: hidden;
+  position: relative; aspect-ratio: var(--aspect); overflow: hidden;
   border-radius: var(--radius); border: 1px solid var(--line);
   cursor: pointer;
   /* enquanto o vídeo não chega: a marca do Zóio apagada no meio */
@@ -142,9 +145,41 @@ main { padding: 14px 16px; }
 
 .single-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .single-bar strong { flex: 1; text-align: center; font-size: 17px; }
-.single-video { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--line); box-shadow: var(--shadow); }
+.single-video { position: relative; background: #000; border-radius: var(--radius); overflow: hidden; aspect-ratio: var(--aspect); border: 1px solid var(--line); box-shadow: var(--shadow); }
 .single-video video-stream, .single-video video { position: absolute; inset: 0; width: 100%; height: 100%; }
 .single-video video { object-fit: contain; }
+.single-video video-stream .info { padding-right: 56px; } /* espaço para o botão de tela cheia */
+
+/* O DVR manda a imagem "espremida" (sub 352x240, canais em 1080N 960x1080).
+   Com a proporção do servidor ligada, o vídeo estica até a caixa, que já tem a proporção da câmera. */
+.stretch .tile video, .stretch .vbox video, .stretch .gate-video video { object-fit: fill; }
+
+.fs-btn {
+  position: absolute; top: 8px; right: 8px; z-index: 3;
+  width: 40px; height: 40px; min-height: 0; padding: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, .45); border: 1px solid rgba(255, 255, 255, .2); color: #fff;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.fs-btn .icon { width: 20px; height: 20px; }
+
+/* tela cheia: na caixa (não no <video>), com o vídeo no meio na proporção certa.
+   .pseudo-full é a mesma coisa para o iPhone, que não tem tela cheia de elemento. */
+.vbox:fullscreen { display: grid; place-items: center; background: #000; border: 0; border-radius: 0; box-shadow: none; }
+.vbox.pseudo-full {
+  position: fixed; inset: 0; z-index: 50; width: auto; max-width: none; margin: 0; aspect-ratio: auto;
+  display: grid; place-items: center; background: #000; border: 0; border-radius: 0; box-shadow: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.vbox:fullscreen > video-stream, .vbox:fullscreen > video,
+.vbox.pseudo-full > video-stream, .vbox.pseudo-full > video {
+  position: relative; inset: auto; display: block;
+  width: min(100vw, 100vh * var(--aspect-n)); height: auto; aspect-ratio: var(--aspect);
+}
+@supports (height: 100dvh) {
+  .vbox.pseudo-full > video-stream, .vbox.pseudo-full > video { width: min(100vw, 100dvh * var(--aspect-n)); }
+}
+.vbox:fullscreen .fs-btn, .vbox.pseudo-full .fs-btn { top: calc(12px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); }
+body:has(.pseudo-full) { overflow: hidden; }
 
 /* ------------------------------------------------------------------ listas */
 
@@ -179,7 +214,11 @@ main { padding: 14px 16px; }
 .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 20px; background: rgba(255, 90, 79, .15); color: var(--alert); vertical-align: 1px; }
 
 .player { margin-bottom: 14px; padding: 12px; background: var(--panel); border-radius: var(--radius); border: 1px solid var(--line); box-shadow: var(--shadow); }
-.player video { width: 100%; max-height: 70vh; background: #000; border-radius: 10px; margin: 8px 0; }
+.clip-video {
+  position: relative; width: min(100%, 70vh * var(--aspect-n)); aspect-ratio: var(--aspect); margin: 8px auto;
+  background: #000; border-radius: 10px; overflow: hidden;
+}
+.clip-video video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .progress { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 8px; }
 .progress div { height: 100%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); width: 0; transition: width .3s; }
 
@@ -246,7 +285,7 @@ main { padding: 14px 16px; }
 
 @media (min-width: 900px) {
   main { max-width: 1400px; margin: 0 auto; padding: 18px 24px; }
-  .single-video { max-height: calc(100vh - 190px); }
+  .single-video { width: min(100%, (100vh - 190px) * var(--aspect-n)); margin: 0 auto; }
   #view-recordings, #view-alerts, #view-settings { max-width: 760px; margin: 0 auto; }
 }
 /* tela larga: as abas sobem para o topo */
@@ -339,7 +378,7 @@ body:not(.live) .gate-btn { margin-left: auto; }
 .sheet-bar strong { display: inline-flex; align-items: center; gap: 8px; font-size: 17px; }
 .sheet-bar strong .icon { color: var(--ok); }
 .gate-video {
-  position: relative; aspect-ratio: 16 / 9; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
+  position: relative; aspect-ratio: var(--aspect); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
   background: url("/web/icons/eye.svg") center / 30% auto no-repeat, linear-gradient(160deg, #171d27, #0d1117);
 }
 .gate-video video-stream, .gate-video video { position: absolute; inset: 0; width: 100%; height: 100%; }
@@ -390,6 +429,9 @@ body:not(.live) .gate-btn { margin-left: auto; }
 .tag.gate { background: rgba(63, 191, 127, .15); color: var(--ok); }
 .lightbox { position: fixed; inset: 0; z-index: 25; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .85); cursor: zoom-out; }
 .lightbox img { max-width: 100%; max-height: 100%; border-radius: var(--radius); }
+/* as fotos vêm do DVR espremidas como o vídeo */
+.stretch .list li img.thumb { height: auto; aspect-ratio: var(--aspect); object-fit: fill; }
+.stretch .lightbox img { width: min(100%, (100vh - 32px) * var(--aspect-n)); max-height: none; aspect-ratio: var(--aspect); object-fit: fill; }
 @media (min-width: 700px) {
   .sheet { align-items: center; }
   .sheet-box { border-radius: 20px; }
@@ -406,4 +448,17 @@ body:not(.live) .gate-btn { margin-left: auto; }
 @media (max-width: 400px) {
   body.live .gate-btn span { display: none; }
   body.live .gate-btn { padding: 4px 9px; }
+}
+
+/* celular deitado vendo uma câmera: só o vídeo, do tamanho da tela (deite de volta para os botões) */
+@media (orientation: landscape) and (max-height: 540px) {
+  body.single { padding-bottom: 0; background: #000; }
+  body.single .top, body.single .tabs, body.single .single-bar { display: none; }
+  body.single main { padding: 0; }
+  body.single .single-video:not(.pseudo-full) { width: min(100vw, 100vh * var(--aspect-n)); margin: 0 auto; border: 0; border-radius: 0; box-shadow: none; }
+}
+@supports (height: 100dvh) {
+  @media (orientation: landscape) and (max-height: 540px) {
+    body.single .single-video:not(.pseudo-full) { width: min(100vw, 100dvh * var(--aspect-n)); }
+  }
 }
