@@ -536,16 +536,37 @@ async function enablePush() {
     const perm = await Notification.requestPermission();
     if (perm !== 'granted') { toast('Permissão de notificação negada.'); return; }
     const reg = await navigator.serviceWorker.ready;
-    const sub = (await reg.pushManager.getSubscription())
-      ?? await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(state.config.push_key) });
+    const sub = (await reg.pushManager.getSubscription()) ?? await subscribePush(reg);
     const cameras = [...document.querySelectorAll('#push-cameras input:checked')].map((i) => Number(i.value));
     store.set('pushCameras', cameras);
     await api('/api/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON(), cameras } });
     toast('Notificações ativadas.');
   } catch (err) {
-    toast(`Não deu para ativar: ${err.message}`);
+    toast(pushErrorText(err), 12000);
   }
   renderPush();
+}
+
+// O navegador fala com o serviço de push dele (no Android, o FCM do Google), não com o Pi.
+// Às vezes o primeiro registro falha logo depois de abrir o navegador, então tenta mais uma vez.
+async function subscribePush(reg) {
+  const opts = { userVisibleOnly: true, applicationServerKey: b64ToBytes(state.config.push_key) };
+  try {
+    return await reg.pushManager.subscribe(opts);
+  } catch (err) {
+    if (err.name !== 'AbortError') throw err;
+    await new Promise((r) => setTimeout(r, 2000));
+    return reg.pushManager.subscribe(opts);
+  }
+}
+
+function pushErrorText(err) {
+  if (err.name === 'AbortError' && /push service/i.test(err.message)) {
+    return 'Não deu para ativar: o navegador não conseguiu falar com o serviço de notificações do Google. '
+      + 'Use o Chrome, confira se o Google Play Services pode usar dados em segundo plano '
+      + 'e se o VPN ou um bloqueador de anúncios não está barrando o Google (mtalk.google.com).';
+  }
+  return `Não deu para ativar: ${err.message}`;
 }
 
 async function disablePush() {
