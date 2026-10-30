@@ -36,6 +36,7 @@ substitutions:
   pulso_garagem: 700ms    # quanto tempo a botoeira (ou o botão do controle extra) fica apertada
   sensor_invertido: "false"  # "true" se o sensor com fio fechar o contato com a garagem aberta
   ganho_microfone: "4"     # volume do microfone na conversa (1 a 64); aumente se ficar baixo
+  volume_toque: "0.3"      # volume do "blim-blom" da campainha no alto-falante (0 a 1; 0 desliga)
 
 esphome:
   name: zoio-porteiro
@@ -97,6 +98,8 @@ binary_sensor:
     filters:
       - delayed_on: 30ms   # ignora ruído no fio
       - delayed_off: 2s    # segura o "tocou" o bastante para chegar no Zóio
+    on_press:  # quem apertou ouve que funcionou, mesmo sem o Pi
+      - lambda: "id(conversa).chime(${volume_toque});"
   # Segunda casa: o Zóio avisa só os aparelhos marcados com ela (Ajustes ›
   # Aparelhos). Sem botão no GPIO18, fica quieta. Para uma casa só, apague.
   - platform: gpio
@@ -105,6 +108,8 @@ binary_sensor:
     filters:
       - delayed_on: 30ms
       - delayed_off: 2s
+    on_press:
+      - lambda: "id(conversa).chime(${volume_toque});"
   # Botão de saída, do lado de dentro: abre o portão na hora, aqui mesmo na
   # placa, então funciona sem o Pi e sem Wi-Fi. O Zóio registra em Alertas.
   # Instale onde não dê para alcançar pela grade do lado de fora.

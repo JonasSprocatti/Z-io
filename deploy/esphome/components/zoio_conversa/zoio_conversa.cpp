@@ -6,7 +6,9 @@
 
 #include <mbedtls/platform_util.h>
 
+#include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 
 namespace esphome::zoio_conversa {
@@ -63,6 +65,32 @@ void ZoioConversa::dump_config() {
                 this->port_, (unsigned) (this->max_duration_ / 1000));
 }
 
+void ZoioConversa::chime(float volume) {
+  if (this->active_ || this->chiming_ || volume <= 0.0f)
+    return;  // em conversa, o toque anterior ainda tocando, ou som desligado
+  volume = std::min(volume, 1.0f);
+  // Duas notas (mi e dó) que vão sumindo, como uma campainha de casa.
+  static const struct {
+    float freq;
+    float seconds;
+  } NOTES[] = {{659.25f, 0.35f}, {523.25f, 0.6f}};
+  this->speaker_buffer_.clear();
+  this->speaker_buffer_.reserve(32000);
+  for (const auto &note : NOTES) {
+    const size_t samples = (size_t) (note.seconds * 16000);
+    for (size_t i = 0; i < samples; i++) {
+      const float t = i / 16000.0f;
+      const float envelope = std::exp(-4.0f * t / note.seconds) * std::min(1.0f, i / 80.0f);  // ataque de 5 ms
+      const auto sample = (int16_t) (volume * 32767.0f * envelope * std::sin(2.0f * (float) M_PI * note.freq * t));
+      this->speaker_buffer_.push_back(sample & 0xFF);
+      this->speaker_buffer_.push_back((sample >> 8) & 0xFF);
+    }
+  }
+  this->chiming_ = this->playing_ = true;
+  this->last_audio_ = millis();
+  this->high_freq_.start();
+}
+
 void ZoioConversa::start(const std::string &key_hex) {
   uint8_t key[KEY_LEN];
   if (key_hex.size() != 2 * KEY_LEN || !parse_hex(key_hex, key, KEY_LEN)) {
@@ -84,7 +112,7 @@ void ZoioConversa::start(const std::string &key_hex) {
   this->mic_buffer_->reset();
   this->speaker_buffer_.clear();
   this->tx_counter_ = this->rx_counter_ = 0;
-  this->has_peer_ = this->playing_ = false;
+  this->has_peer_ = this->playing_ = this->chiming_ = false;  // a conversa corta o toque
   this->started_ = this->last_rx_ = millis();
   this->last_tx_ = this->last_audio_ = 0;
   this->active_ = true;
@@ -137,6 +165,15 @@ void ZoioConversa::close_socket_() {
 }
 
 void ZoioConversa::loop() {
+  if (this->chiming_) {
+    this->play_();
+    if (this->speaker_buffer_.empty()) {
+      this->speaker_->finish();  // para depois de tocar o que ficou no alto-falante
+      this->chiming_ = this->playing_ = false;
+      this->speaker_buffer_.shrink_to_fit();
+      this->high_freq_.stop();
+    }
+  }
   if (!this->active_)
     return;
   this->receive_();
