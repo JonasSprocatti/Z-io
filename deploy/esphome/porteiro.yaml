@@ -11,6 +11,7 @@
 #   GPIO10 → IN1 do módulo relé: fechadura do portão
 #   GPIO17 ← botão da campainha (o outro fio no GND)
 #   GPIO18 ← botão da campainha da casa 2, se houver (o outro fio no GND)
+#   GPIO21 ← botão de saída, do lado de dentro, se houver (o outro fio no GND)
 #   GPIO8  ← DATA do receptor de rádio 433 MHz (RXB6, no 3V3), se houver
 #   Garagens: veja o pacote escolhido em `packages:` no fim deste arquivo.
 #
@@ -104,6 +105,17 @@ binary_sensor:
     filters:
       - delayed_on: 30ms
       - delayed_off: 2s
+  # Botão de saída, do lado de dentro: abre o portão na hora, aqui mesmo na
+  # placa, então funciona sem o Pi e sem Wi-Fi. O Zóio registra em Alertas.
+  # Instale onde não dê para alcançar pela grade do lado de fora.
+  - platform: gpio
+    name: "Botao saida"  # vira botao_saida
+    pin: { number: GPIO21, mode: { input: true, pullup: true }, inverted: true }
+    filters:
+      - delayed_on: 50ms   # ignora ruído no fio
+      - delayed_off: 1s
+    on_press:
+      - script.execute: pulso_portao
 
 sensor:
   - platform: wifi_signal

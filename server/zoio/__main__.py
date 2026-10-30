@@ -206,6 +206,8 @@ def manage_porteiro(cfg: config.Config, action: str, door: str | None, seconds: 
                         print("  campainhas: " + ", ".join(b["name"] for b in bells))
                     else:
                         print("  campainha: " + ("ok" if bells else "não encontrada"))
+                    if info.get("exit_button"):
+                        print("  botão de saída: ok")
                     if "portao" not in porteiro.doors:
                         print("  atenção: não achei o botão abrir_portao.")
                         return 1

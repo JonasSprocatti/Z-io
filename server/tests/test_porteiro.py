@@ -278,6 +278,32 @@ async def test_one_doorbell_per_house(aiohttp_client, make_cfg, go2rtc):
         await board.stop()
 
 
+async def test_exit_button_is_logged(aiohttp_client, make_cfg, go2rtc):
+    """Botão de saída: a placa abre sozinha; o Zóio só registra, sem apertar nada na placa."""
+    board = await FakeEspHome(KEY, sensors={**FakeEspHome(KEY).sensors, "botao_saida": (0x3010, "Botao saida")}).start()
+    try:
+        cfg = make_cfg(1, alerts=False, gate_host="127.0.0.1", gate_port=board.port, gate_key=KEY, gate_camera=2)
+        cfg.go2rtc_url = str(go2rtc.make_url("")).rstrip("/")
+        app = create_app(cfg)
+        await aiohttp_client(app)
+        store, gate = app["zoio_store"], app["zoio_porteiro"]
+        await until(lambda: gate.online)
+        assert gate.info["exit_button"] and "botao_saida" not in [d.sensor for d in gate.doors.values()]
+        queue = app["zoio_bus"].subscribe()
+        for _ in range(2):  # dois apertos seguidos: um registro só
+            await board.set_state("botao_saida", True)
+            await board.set_state("botao_saida", False)
+        await until(lambda: any(e["kind"] == "Portao" for e in store.events(status=None)))
+        await asyncio.sleep(0.1)
+        events = [e for e in store.events(status=None) if e["kind"] == "Portao"]
+        assert len(events) == 1 and events[0]["status"] == "Aberto" and events[0]["camera"] == 2
+        assert events[0]["detail"]["by"] == "botão de dentro" and events[0]["detail"]["photo"]
+        assert board.pressed == []
+        assert any(p["type"] == "porta" and p["id"] == events[0]["id"] for p in [queue.get_nowait() for _ in range(queue.qsize())])
+    finally:
+        await board.stop()
+
+
 async def test_push_text_names_the_house(client, monkeypatch):
     sent = []
 

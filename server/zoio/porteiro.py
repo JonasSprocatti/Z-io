@@ -13,6 +13,8 @@ Nomes que a placa precisa ter (deploy/esphome/porteiro.yaml):
 - sensores `campainha`, `campainha_2`...: botão de campainha de cada casa
   (com mais de uma, cada aparelho pode ser marcado com a sua casa e só recebe
   o aviso dela);
+- sensor `botao_saida` (opcional): botão do lado de dentro; a placa abre o
+  portão sozinha (funciona sem o Pi) e o Zóio só registra;
 - ações `conversa_iniciar(chave)` e `conversa_parar` (opcionais): microfone e
   alto-falante no portão, com o áudio por UDP cifrado (ver conversa.py).
 
@@ -50,6 +52,8 @@ RC_SWITCH = re.compile(r"Received RCSwitch Raw: protocol=(\d+) data='([01]+)'")
 GATE_ID = "portao"
 GATE_BUTTON = "abrir_portao"
 BELL = re.compile(r"^campainha(?:_(\d{1,2}))?$")  # campainha (casa 1), campainha_2...
+EXIT_BUTTON = "botao_saida"
+EXIT_BY = "botão de dentro"
 WIFI_SIGNAL = "sinal_wi-fi"  # "Sinal Wi-Fi" no firmware
 CALL_START = "conversa_iniciar"
 CALL_STOP = "conversa_parar"
@@ -130,6 +134,7 @@ class Porteiro:
         self.bells: dict[str, int] = {}  # sensor da campainha -> número da casa
         self._bell: dict[str, bool] = {}
         self._last_ring: dict[int, float] = {}
+        self._last_exit = -MIN_INTERVAL
         self._last: dict[str, float] = {}
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
@@ -202,6 +207,7 @@ class Porteiro:
         self.info = {
             "name": board.name, "mac": board.mac, "version": board.server_info,
             "doorbell": bool(self.bells),
+            "exit_button": EXIT_BUTTON in entities.binary_sensors,
             "talk": CALL_START in entities.services,
             "buttons": sorted(entities.buttons), "sensors": sorted(entities.binary_sensors),
         }
@@ -267,6 +273,10 @@ class Porteiro:
             return
         first = obj not in self._synced
         self._synced.add(obj)
+        if obj == EXIT_BUTTON:
+            if state and not first:
+                self._spawn(self._log_exit())
+            return
         if obj in self.bells:
             if state and not self._bell.get(obj) and not first:
                 self._spawn(self.ring(self.bells[obj]))
@@ -301,6 +311,20 @@ class Porteiro:
         detail = {"door": GATE_ID, "photo": bool(image), "house": house, "house_name": name}
         event = self._add_event(self.cfg.gate_camera, BELL_KIND, "Tocou", detail, image)
         self.bus.publish({"type": "campainha", **event})
+        return event
+
+    async def _log_exit(self) -> dict | None:
+        """Abriram pelo botão de dentro. A placa já abriu sozinha: aqui só fica o registro."""
+        now = time.monotonic()
+        if now - self._last_exit < MIN_INTERVAL:
+            return None
+        self._last_exit = now
+        log.info("porteiro: portão aberto pelo %s", EXIT_BY)
+        door = self.doors.get(GATE_ID)
+        image = await self._photo(self.cfg.gate_camera)
+        detail = {"door": GATE_ID, "name": door.name if door else "Portão", "action": "abrir", "by": EXIT_BY, "device_id": None, "error": None, "photo": bool(image)}
+        event = self._add_event(self.cfg.gate_camera, GATE_KIND, DONE[("portao", "abrir")], detail, image)
+        self.bus.publish({"type": "porta", **event})
         return event
 
     async def _log_change(self, door: Door, opened: bool) -> None:

@@ -30,6 +30,7 @@ Uma placa ESP32-S3 no portão faz o papel do porteiro: avisa quando tocam a camp
   - Fica em Alertas como "Conversa no portão", com quem atendeu, quanto tempo durou e a foto do começo.
 - **Campainha:** quem tem a permissão de portaria recebe uma notificação urgente ("Tocaram no portão às 14:32"), que vibra e fica na tela até ser tocada. Ela abre a portaria já no portão. Com o app aberto, a portaria abre sozinha com o aviso.
 - **Duas casas:** a placa aceita um segundo botão de campainha (GPIO18). Cada toque diz de qual casa veio ("Campainha: Casa 2"). Em **Ajustes › Aparelhos**, o administrador escolhe a campainha de cada aparelho com portaria: só a de uma casa ou todas. O aparelho só recebe a notificação, e só tem a portaria aberta sozinha, quando tocam a campainha dele. Em Alertas aparecem todos os toques, com o nome da casa.
+- **Botão de saída:** um botão do lado de dentro (GPIO21) abre o portão na hora, para sair rápido. Quem abre é a própria placa, então funciona mesmo com o Pi ou o Wi-Fi fora do ar. O Zóio registra cada abertura em Alertas ("Portão aberto por botão de dentro", com foto), sem mandar notificação. Instale onde não dê para alcançar pela grade do lado de fora.
 - Cada toque da campainha, cada comando e cada garagem que abriu ou fechou por fora (pelo controle remoto, por exemplo) entram em **Alertas**, com uma foto da câmera daquela porta. Os comandos registram quem mandou, e os outros administradores recebem uma notificação.
 - Se a placa sair do ar, a portaria mostra "A placa do porteiro está desconectada" e o Zóio tenta reconectar sozinho.
 
@@ -94,6 +95,7 @@ Tudo vai na fileira esquerda do ESP32-S3 DevKitC-1 (olhando por cima, com o USB 
 | GPIO7, GPIO15, GPIO16 | amplificador MAX98357A: BCLK, LRC, DIN (VIN no 5V; SD e GAIN soltos) |
 | GPIO17 | botão da campainha (o outro fio no GND) |
 | GPIO18 | botão da campainha da casa 2, se houver (o outro fio no GND) |
+| GPIO21 | botão de saída, do lado de dentro, se houver (o outro fio no GND) |
 | GPIO8 | DATA do receptor 433 MHz RXB6 (VCC no 3V3), se usar rádio |
 | GPIO9 | DATA do transmissor 433 MHz STX882 (VCC no 5V), na opção rádio |
 | GPIO10 | IN1 do relé: fechadura do portão |
@@ -107,7 +109,7 @@ Tudo vai na fileira esquerda do ESP32-S3 DevKitC-1 (olhando por cima, com o USB 
 - **Sensores com fio:** com a garagem fechada, o ímã fica encostado e o contato fecha. Se o seu sensor fizer o contrário, mude `sensor_invertido` para `"true"`.
 - **Antenas de 433 MHz:** um fio rígido de 17,3 cm em cada módulo de rádio.
 
-Se a voz chegar baixa ou estourada no celular, ajuste `ganho_microfone` (padrão 4). Os tempos (`pulso_portao` e `pulso_garagem`) e essas opções ficam no topo de [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml). Os nomes dos botões, sensores e ações não podem mudar, porque são eles que o Zóio procura: `abrir_portao`, `garagem_1`, `garagem_2`, `garagem_1_aberta`, `garagem_2_aberta`, `campainha`, `campainha_2`, `sinal_wi-fi`, `conversa_iniciar` e `conversa_parar`.
+Se a voz chegar baixa ou estourada no celular, ajuste `ganho_microfone` (padrão 4). Os tempos (`pulso_portao` e `pulso_garagem`) e essas opções ficam no topo de [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml). Os nomes dos botões, sensores e ações não podem mudar, porque são eles que o Zóio procura: `abrir_portao`, `garagem_1`, `garagem_2`, `garagem_1_aberta`, `garagem_2_aberta`, `campainha`, `campainha_2`, `botao_saida`, `sinal_wi-fi`, `conversa_iniciar` e `conversa_parar`.
 
 ## Programação da placa
 
