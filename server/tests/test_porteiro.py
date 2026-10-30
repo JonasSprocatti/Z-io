@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sqlite3
 import sys
 import time
@@ -195,13 +196,15 @@ async def test_garage_open_stop_and_close_rules(client, board, go2rtc):
 async def test_doorbell_notifies_and_keeps_photo(client, board, go2rtc):
     admin = await pair_admin(client)
     rings = []
-    client.porteiro.notifier.doorbell = lambda: _record(rings)
+    client.porteiro.notifier.doorbell = lambda house, name: _record(rings)
     queue = client.bus.subscribe()
     await board.set_state("campainha", True)
     await board.set_state("campainha", False)
     await until(lambda: any(e["kind"] == "Campainha" for e in client.store.events(status=None)))
     event = client.store.events()[0]  # aparece no histórico de alertas
-    assert (event["kind"], event["status"], event["camera"], event["detail"]) == ("Campainha", "Tocou", 2, {"door": "portao", "photo": True})
+    assert (event["kind"], event["status"], event["camera"]) == ("Campainha", "Tocou", 2)
+    assert event["detail"] == {"door": "portao", "photo": True, "house": 1, "house_name": None}  # uma campainha só: sem nome de casa
+    assert (await portaria(client, admin))["bells"] == [{"house": 1, "name": None}]
     assert rings == [1] and go2rtc.frames == ["cam2"]
     published = [queue.get_nowait() for _ in range(queue.qsize())]
     assert any(p["type"] == "campainha" and p["id"] == event["id"] for p in published)
@@ -215,9 +218,80 @@ async def test_doorbell_notifies_and_keeps_photo(client, board, go2rtc):
     assert photo.status == 200
 
 
-async def _record(items):
-    items.append(1)
+async def _record(items, item=1):
+    items.append(item)
     return 1
+
+
+TWO_BELLS = {**FakeEspHome(KEY).sensors, "campainha_2": (0x3002, "Campainha 2")}
+
+
+async def test_one_doorbell_per_house(aiohttp_client, make_cfg, go2rtc):
+    """Duas casas: cada toque diz a casa, e cada aparelho só recebe o aviso da sua."""
+    board = await FakeEspHome(KEY, sensors=TWO_BELLS).start()
+    try:
+        cfg = make_cfg(1, alerts=False, gate_host="127.0.0.1", gate_port=board.port, gate_key=KEY, gate_camera=2, bell_names=["Casa do Jonas"])
+        cfg.go2rtc_url = str(go2rtc.make_url("")).rstrip("/")
+        app = create_app(cfg)
+        client = await aiohttp_client(app)
+        client.store, client.devices, client.porteiro = app["zoio_store"], app["zoio_devices"], app["zoio_porteiro"]
+        await until(lambda: client.porteiro.online)
+        admin = await pair_admin(client)
+        assert (await portaria(client, admin))["bells"] == [{"house": 1, "name": "Casa do Jonas"}, {"house": 2, "name": "Casa 2"}]
+
+        # cada aparelho com a sua casa; o admin fica com todas
+        phones = {}
+        for house in (1, 2):
+            phone = Phone(f"Celular da casa {house}")
+            await phone.register(client)
+            client.devices.approve(phone.id, admin=False, by="pi", gate=True)
+            await phone.login(client)
+            resp = await client.post(f"/api/devices/{phone.id}/house", headers=admin.h, json={"house": house})
+            assert resp.status == 200 and (await resp.json())["house"] == house
+            phones[house] = phone
+        for bad in ("2", True, 0, 100):
+            assert (await client.post(f"/api/devices/{phones[1].id}/house", headers=admin.h, json={"house": bad})).status == 400
+        assert (await client.post(f"/api/devices/{phones[1].id}/house", headers=phones[2].h, json={"house": 2})).status == 403
+        for name, phone in (("admin", admin), ("casa1", phones[1]), ("casa2", phones[2])):
+            sub = {"endpoint": f"https://push.example/{name}", "keys": {"p256dh": "x", "auth": "y"}}
+            assert (await client.post("/api/push/subscribe", json={"subscription": sub}, headers=phone.h)).status == 200
+        endpoints = lambda house: sorted(s["sub"]["endpoint"].rsplit("/", 1)[1] for s in client.store.subscriptions(gate_only=True, house=house))
+        assert endpoints(1) == ["admin", "casa1"] and endpoints(2) == ["admin", "casa2"]
+        assert endpoints(None) == ["admin", "casa1", "casa2"]
+
+        rings = []
+        client.porteiro.notifier.doorbell = lambda house, name: _record(rings, (house, name))
+        await board.set_state("campainha_2", True)
+        await board.set_state("campainha_2", False)
+        await until(lambda: rings == [(2, "Casa 2")])
+        # a outra casa toca logo depois: não é engolida pelo intervalo da primeira
+        await board.set_state("campainha", True)
+        await board.set_state("campainha", False)
+        await until(lambda: rings == [(2, "Casa 2"), (1, "Casa do Jonas")])
+        await until(lambda: len([e for e in client.store.events(status=None) if e["kind"] == "Campainha"]) == 2)
+        details = [e["detail"] for e in client.store.events(status=None) if e["kind"] == "Campainha"]
+        assert [(d["house"], d["house_name"]) for d in details] == [(1, "Casa do Jonas"), (2, "Casa 2")]
+        # de volta a todas
+        resp = await client.post(f"/api/devices/{phones[1].id}/house", headers=admin.h, json={"house": None})
+        assert (await resp.json())["house"] is None
+    finally:
+        await board.stop()
+
+
+async def test_push_text_names_the_house(client, monkeypatch):
+    sent = []
+
+    async def fake_send(sub, payload):
+        sent.append(json.loads(payload))
+        return True
+
+    notifier = client.porteiro.notifier
+    monkeypatch.setattr(notifier, "send", fake_send)
+    admin = await pair_admin(client)
+    sub = {"endpoint": "https://push.example/admin", "keys": {"p256dh": "x", "auth": "y"}}
+    await client.post("/api/push/subscribe", json={"subscription": sub}, headers=admin.h)
+    assert await notifier.doorbell() == 1 and await notifier.doorbell(2, "Casa 2") == 1
+    assert [(p["title"], p["tag"]) for p in sent] == [("Campainha", "campainha-1"), ("Campainha: Casa 2", "campainha-2")]
 
 
 async def test_board_offline_then_back(client, board):
@@ -293,6 +367,7 @@ def test_config(make_cfg, tmp_path):
     env.write_text(
         "DVR_HOST=x\nDVR_USER=u\nDVR_PASS=p\nZOIO_CHANNELS=4\nZOIO_GATE_HOST=192.168.15.20\nZOIO_GATE_KEY=curta\nZOIO_GATE_CAMERA=9\n"
         "ZOIO_GARAGE_CAMERAS=3, 9\nZOIO_GARAGE_NAMES=Garagem da frente\nZOIO_GARAGE_TRAVEL=25\n"
+        "ZOIO_BELL_NAMES=Casa da frente, \n"
     )
     from zoio import config
 
@@ -301,6 +376,7 @@ def test_config(make_cfg, tmp_path):
     assert cfg.gate_camera is None  # câmera que não existe é ignorada
     assert (cfg.garage_camera(1), cfg.garage_camera(2), cfg.garage_camera(3)) == (3, None, None)
     assert (cfg.garage_name(1), cfg.garage_name(2), cfg.garage_travel) == ("Garagem da frente", "Garagem 2", 25)
+    assert (cfg.bell_name(1), cfg.bell_name(2), cfg.bell_name(3)) == ("Casa da frente", "Casa 2", "Casa 3")
 
 
 def test_migration_gives_gate_to_existing_admins(tmp_path):
@@ -319,6 +395,7 @@ def test_migration_gives_gate_to_existing_admins(tmp_path):
     db.close()
     store = Store(tmp_path / "zoio.db")
     assert store.device("a")["gate"] == 1 and store.device("b")["gate"] == 0
+    assert store.device("a")["house"] is None  # sem casa: recebe todas as campainhas
     assert store.events()[0]["detail"] is None
     store.close()
 

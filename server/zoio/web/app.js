@@ -407,7 +407,7 @@ function portariaItem(ev, when, date) {
   const failed = ev.status === 'Falhou';
   let title;
   let who = d.by ? `por ${d.by}` : null;
-  if (ev.kind === 'Campainha') title = 'Campainha tocou';
+  if (ev.kind === 'Campainha') title = d.house_name ? `Campainha tocou: ${d.house_name}` : 'Campainha tocou';
   else if (ev.kind === 'Conversa') title = failed ? 'Conversa no portão não começou' : `Conversa no portão (${duration(d.seconds ?? 0)})`;
   else if (ev.kind === 'Portao') title = failed ? 'Portão não abriu' : 'Portão aberto';
   else if (ev.status === 'Abriu' || ev.status === 'Fechou') {
@@ -924,9 +924,13 @@ function bindPushToTalk(btn) {
 function ringed(ev) {
   const p = portaria();
   if (!(p.enabled && p.allowed)) return;
+  // aparelho de uma casa só abre a portaria quando tocam a campainha dela
+  const house = state.me?.device?.house;
+  const d = ev.detail ?? {};
+  if (d.house_name && house && d.house !== house) return;
   const at = new Date(ev.received_at * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   openGateSheet('portao');
-  $('#gate-ring').textContent = `Tocaram a campainha às ${at}.`;
+  $('#gate-ring').textContent = `Tocaram a campainha${d.house_name ? ` (${d.house_name})` : ''} às ${at}.`;
   $('#gate-ring').hidden = false;
   navigator.vibrate?.([300, 150, 300]);
 }
@@ -982,16 +986,41 @@ function deviceItem(d) {
   if (d.status === 'approved' && !d.current) actions.push(el('button', { class: 'ghost small danger', onclick: () => act('revoke', `Revogar "${d.name}"? Ele perde o acesso na hora.`) }, 'Revogar'));
   if (d.status === 'revoked') actions.push(el('button', { class: 'ghost small', onclick: () => act('delete', `Excluir "${d.name}"? Ele poderá pedir acesso de novo.`) }, 'Excluir'));
   const gateOn = portaria().enabled;
+  const bells = portaria().bells ?? [];
+  const houses = gateOn && d.status === 'approved' && d.gate && bells.length > 1;
   if (gateOn && d.status === 'approved') {
     actions.push(el('button', { class: 'ghost small', onclick: () => setGatePermission(d, !d.gate) }, d.gate ? 'Bloquear portaria' : 'Liberar portaria'));
   }
+  if (houses) actions.push(houseSelect(d, bells));
+  const houseName = houses ? bells.find((b) => b.house === d.house)?.name : null;
   return el('li', {},
     evIcon('phone', { wait: 'warn', ok: 'info', off: 'muted' }[cls]),
     el('div', { class: 'main' },
       el('div', {}, d.name, d.current ? ' (este aparelho) ' : ' ', el('span', { class: `tag ${cls}` }, label),
-        gateOn && d.status === 'approved' && d.gate ? el('span', { class: 'tag gate' }, 'portaria') : null),
+        gateOn && d.status === 'approved' && d.gate ? el('span', { class: 'tag gate' }, 'portaria') : null,
+        houseName ? el('span', { class: 'tag bell' }, houseName) : null),
       el('div', { class: 'sub' }, details)),
     el('div', { class: 'dev-actions' }, ...actions));
+}
+
+// Com uma campainha por casa: de qual casa este aparelho recebe o aviso.
+function houseSelect(d, bells) {
+  const select = el('select', { 'aria-label': `Campainha que "${d.name}" recebe` },
+    el('option', { value: '', selected: d.house == null }, 'todas'),
+    ...bells.map((b) => el('option', { value: b.house, selected: b.house === d.house }, b.name)));
+  select.addEventListener('change', async () => {
+    try {
+      await api(`/api/devices/${d.id}/house`, { method: 'POST', body: { house: select.value ? Number(select.value) : null } });
+      if (d.current) {
+        state.config = await api('/api/config');
+        state.me.device = state.config.device;
+      }
+    } catch (err) {
+      toast(err.message);
+    }
+    refreshDevices();
+  });
+  return el('label', { class: 'dev-house' }, 'Campainha', select);
 }
 
 async function setGatePermission(d, allow) {

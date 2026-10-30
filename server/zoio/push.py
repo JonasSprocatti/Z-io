@@ -146,14 +146,18 @@ class Notifier:
                 sent += 1
         return sent
 
-    async def doorbell(self) -> int:
-        """Campainha: avisa todos os aparelhos que podem atender (permissão de portaria)."""
+    async def doorbell(self, house: int = 1, name: str | None = None) -> int:
+        """Campainha: avisa os aparelhos que podem atender (permissão de portaria).
+
+        Com uma campainha por casa (`name`), só os aparelhos daquela casa e os sem casa.
+        """
         payload = json.dumps(
-            {"title": "Campainha", "body": f"Tocaram no portão às {time.strftime('%H:%M')}", "tag": "campainha", "url": "/#portaria", "urgent": True},
+            {"title": f"Campainha: {name}" if name else "Campainha", "body": f"Tocaram no portão às {time.strftime('%H:%M')}",
+             "tag": f"campainha-{house}", "url": "/#portaria", "urgent": True},
             ensure_ascii=False,
         ).encode()
         sent = 0
-        for item in self.store.subscriptions(gate_only=True):
+        for item in self.store.subscriptions(gate_only=True, house=house if name else None):
             if await self.send(item["sub"], payload):
                 sent += 1
         return sent

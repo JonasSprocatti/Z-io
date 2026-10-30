@@ -29,6 +29,7 @@ Uma placa ESP32-S3 no portão faz o papel do porteiro: avisa quando tocam a camp
   - A conversa acaba sozinha em 10 minutos, ou se o celular ou a placa perderem a conexão por alguns segundos.
   - Fica em Alertas como "Conversa no portão", com quem atendeu, quanto tempo durou e a foto do começo.
 - **Campainha:** quem tem a permissão de portaria recebe uma notificação urgente ("Tocaram no portão às 14:32"), que vibra e fica na tela até ser tocada. Ela abre a portaria já no portão. Com o app aberto, a portaria abre sozinha com o aviso.
+- **Duas casas:** a placa aceita um segundo botão de campainha (GPIO18). Cada toque diz de qual casa veio ("Campainha: Casa 2"). Em **Ajustes › Aparelhos**, o administrador escolhe a campainha de cada aparelho com portaria: só a de uma casa ou todas. O aparelho só recebe a notificação, e só tem a portaria aberta sozinha, quando tocam a campainha dele. Em Alertas aparecem todos os toques, com o nome da casa.
 - Cada toque da campainha, cada comando e cada garagem que abriu ou fechou por fora (pelo controle remoto, por exemplo) entram em **Alertas**, com uma foto da câmera daquela porta. Os comandos registram quem mandou, e os outros administradores recebem uma notificação.
 - Se a placa sair do ar, a portaria mostra "A placa do porteiro está desconectada" e o Zóio tenta reconectar sozinho.
 
@@ -92,6 +93,7 @@ Tudo vai na fileira esquerda do ESP32-S3 DevKitC-1 (olhando por cima, com o USB 
 | GPIO4, GPIO5, GPIO6 | microfone INMP441: SCK, WS, SD (L/R no GND) |
 | GPIO7, GPIO15, GPIO16 | amplificador MAX98357A: BCLK, LRC, DIN (VIN no 5V; SD e GAIN soltos) |
 | GPIO17 | botão da campainha (o outro fio no GND) |
+| GPIO18 | botão da campainha da casa 2, se houver (o outro fio no GND) |
 | GPIO8 | DATA do receptor 433 MHz RXB6 (VCC no 3V3), se usar rádio |
 | GPIO9 | DATA do transmissor 433 MHz STX882 (VCC no 5V), na opção rádio |
 | GPIO10 | IN1 do relé: fechadura do portão |
@@ -105,7 +107,7 @@ Tudo vai na fileira esquerda do ESP32-S3 DevKitC-1 (olhando por cima, com o USB 
 - **Sensores com fio:** com a garagem fechada, o ímã fica encostado e o contato fecha. Se o seu sensor fizer o contrário, mude `sensor_invertido` para `"true"`.
 - **Antenas de 433 MHz:** um fio rígido de 17,3 cm em cada módulo de rádio.
 
-Se a voz chegar baixa ou estourada no celular, ajuste `ganho_microfone` (padrão 4). Os tempos (`pulso_portao` e `pulso_garagem`) e essas opções ficam no topo de [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml). Os nomes dos botões, sensores e ações não podem mudar, porque são eles que o Zóio procura: `abrir_portao`, `garagem_1`, `garagem_2`, `garagem_1_aberta`, `garagem_2_aberta`, `campainha`, `sinal_wi-fi`, `conversa_iniciar` e `conversa_parar`.
+Se a voz chegar baixa ou estourada no celular, ajuste `ganho_microfone` (padrão 4). Os tempos (`pulso_portao` e `pulso_garagem`) e essas opções ficam no topo de [`deploy/esphome/porteiro.yaml`](../deploy/esphome/porteiro.yaml). Os nomes dos botões, sensores e ações não podem mudar, porque são eles que o Zóio procura: `abrir_portao`, `garagem_1`, `garagem_2`, `garagem_1_aberta`, `garagem_2_aberta`, `campainha`, `campainha_2`, `sinal_wi-fi`, `conversa_iniciar` e `conversa_parar`.
 
 ## Programação da placa
 
@@ -160,6 +162,7 @@ sudo zoio portao radio                # mostra os códigos de rádio que a placa
 | `ZOIO_GATE_CAMERA` | câmera do portão: ao vivo na portaria e foto da campainha e de cada abertura |
 | `ZOIO_GARAGE_CAMERAS` | câmeras das garagens, na ordem (ex.: `2,3`). Sem câmera, a garagem não fecha pelo app |
 | `ZOIO_GARAGE_NAMES` | nomes das garagens no app, na ordem (padrão `Garagem 1,Garagem 2`) |
+| `ZOIO_BELL_NAMES` | nomes das casas, na ordem das campainhas (padrão `Casa 1,Casa 2`); só aparecem com mais de uma campainha |
 | `ZOIO_GARAGE_TRAVEL` | segundos que o motor leva para abrir ou fechar (padrão 30); é quanto tempo o Parar fica na tela |
 | `ZOIO_GATE_PORT` | porta da API (padrão 6053) |
 | `ZOIO_GATE_AUDIO_PORT` | porta UDP do áudio da conversa na placa (padrão 6054, a mesma do `port:` do `zoio_conversa`) |

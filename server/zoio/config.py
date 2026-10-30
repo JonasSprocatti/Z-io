@@ -93,6 +93,7 @@ class Config:
     gate_camera: int | None = None
     garage_cameras: list[int | None] = field(default_factory=list)  # na ordem das garagens
     garage_names: list[str] = field(default_factory=list)
+    bell_names: list[str] = field(default_factory=list)  # uma campainha por casa, na ordem
     garage_travel: int = 30  # segundos que o motor leva para abrir ou fechar
     gate_error: str | None = None  # configuração do porteiro com problema
 
@@ -103,6 +104,9 @@ class Config:
 
     def garage_name(self, n: int) -> str:
         return self.garage_names[n - 1] if n - 1 < len(self.garage_names) and self.garage_names[n - 1] else f"Garagem {n}"
+
+    def bell_name(self, n: int) -> str:
+        return self.bell_names[n - 1] if n - 1 < len(self.bell_names) and self.bell_names[n - 1] else f"Casa {n}"
 
     def garage_camera(self, n: int) -> int | None:
         return self.garage_cameras[n - 1] if n - 1 < len(self.garage_cameras) else None
@@ -197,6 +201,7 @@ def load(env_file: str | None = None) -> Config:
         gate_camera=camera_ref(env.get("ZOIO_GATE_CAMERA", "")),
         garage_cameras=garage_cameras,
         garage_names=[n.strip() for n in env.get("ZOIO_GARAGE_NAMES", "").split(",")] if env.get("ZOIO_GARAGE_NAMES", "").strip() else [],
+        bell_names=[n.strip() for n in env.get("ZOIO_BELL_NAMES", "").split(",")] if env.get("ZOIO_BELL_NAMES", "").strip() else [],
         garage_travel=int(env.get("ZOIO_GARAGE_TRAVEL", "30")),
         gate_error=gate_error,
     )

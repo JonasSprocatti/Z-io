@@ -164,6 +164,16 @@ class Devices:
         self.store.update_device(device_id, gate=int(allow))
         return self.store.device(device_id)
 
+    def set_house(self, device_id: str, house: int | None) -> dict:
+        """Casa do aparelho: ele só recebe o aviso da campainha dela (None: de todas)."""
+        device = self.store.device(device_id)
+        if device is None:
+            raise DeviceError("aparelho não encontrado")
+        if house is not None and not 1 <= house <= 99:
+            raise DeviceError("casa inválida")
+        self.store.update_device(device_id, house=house)
+        return self.store.device(device_id)
+
     def revoke(self, device_id: str) -> dict:
         device = self.store.device(device_id)
         if device is None:
@@ -254,6 +264,7 @@ def public(device: dict, current_id: str | None = None) -> dict:
         "status": device["status"],
         "admin": bool(device["admin"]),
         "gate": bool(device.get("gate")),
+        "house": device.get("house"),
         "user": device.get("user"),
         "user_agent": device.get("user_agent"),
         "created_at": device["created_at"],
