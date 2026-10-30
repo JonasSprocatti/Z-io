@@ -63,6 +63,8 @@ Lista completa e preços em `fase-2/lista-compras-portao.md` (arquivos do projet
 
 Para montar sem solda: ESP32-S3 e módulos com os pinos já soldados, uma placa de expansão com bornes para o ESP32-S3 de 44 pinos, jumpers fêmea-fêmea e conectores de alavanca para dividir 5 V e GND.
 
+Caixa para imprimir em 3D, com lugar para tudo isso, frente de porteiro e aba contra chuva: [hardware/caixa-porteiro](../hardware/caixa-porteiro/README.md). Ela substitui a caixa hermética comprada.
+
 ## Garagens: três jeitos de acionar, dois de saber o estado
 
 Para o Zóio é tudo igual: um botão `garagem_N` por garagem e, se houver, um sensor `garagem_N_aberta`. A escolha fica no fim do `porteiro.yaml`, em `packages:`.
