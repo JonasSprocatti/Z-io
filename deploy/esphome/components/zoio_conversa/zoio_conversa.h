@@ -39,6 +39,9 @@ class ZoioConversa : public Component {
   void start(const std::string &key_hex);
   void stop();
   bool is_active() const { return this->active_; }
+  /// Toca um "blim-blom" curto no alto-falante (volume de 0 a 1), para quem
+  /// apertou a campainha saber que funcionou. Não toca durante uma conversa.
+  void chime(float volume);
 
  protected:
   bool open_socket_();
@@ -60,6 +63,7 @@ class ZoioConversa : public Component {
   std::atomic<bool> active_{false};
   bool has_peer_{false};
   bool playing_{false};
+  bool chiming_{false};
   struct sockaddr_in peer_{};
   uint64_t tx_counter_{0};
   uint64_t rx_counter_{0};
