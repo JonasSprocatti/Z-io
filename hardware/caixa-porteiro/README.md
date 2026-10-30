@@ -1,6 +1,6 @@
 # Caixa do Porteiro do Zóio (impressão 3D)
 
-Caixa de porteiro eletrônico para o portão, com lugar para tudo o que liga no ESP32-S3: a placa de extensão com o ESP32, o relé de 4 canais, o regulador 12 V → 5 V, os conectores Wago, o amplificador, o alto-falante, o microfone, o botão da campainha e o rádio 433 MHz opcional. Os cabos saem só por baixo, por prensa-cabos. Ela substitui a caixa hermética da lista de compras.
+Caixa de porteiro eletrônico para o portão, com lugar para tudo o que liga no ESP32-S3: a placa de extensão com o ESP32, o relé de 4 canais, o regulador 12 V → 5 V, os conectores Wago, o amplificador, o alto-falante, o microfone, os 2 botões de campainha (uma por casa) e o rádio 433 MHz opcional. Os cabos saem só por baixo, por prensa-cabos. Ela substitui a caixa hermética da lista de compras.
 
 ![Montado](previa/1-montado.png)
 
@@ -18,7 +18,7 @@ As placas e os fios das imagens são só ilustração. Os fios coloridos mostram
 | Arquivo | O que é | Como vai na mesa |
 |---|---|---|
 | [stl/base.stl](stl/base.stl) | Caixa de trás, parafusada na parede | Fundo na mesa |
-| [stl/tampa.stl](stl/tampa.stl) | Frente do porteiro: grade do alto-falante, furo do microfone, botão e o logo | Frente na mesa (o arquivo já vem virado) |
+| [stl/tampa.stl](stl/tampa.stl) | Frente do porteiro: grade do alto-falante, furo do microfone, 2 botões com lugar para etiqueta e o logo | Frente na mesa (o arquivo já vem virado) |
 | [stl/bandeja.stl](stl/bandeja.stl) | Chassi que sai inteiro da caixa, com o encaixe de cada placa | Deitada |
 | [stl/anel.stl](stl/anel.stl) | Anel que prende o alto-falante na tampa | Deitado |
 | [stl/capa.stl](stl/capa.stl) | Aba contra chuva, parafusada na parede logo acima da caixa | Placa de fixação na mesa |
@@ -47,7 +47,7 @@ Para todas as peças:
 
 Vai uns 400 a 450 g de filamento (um rolo de 1 kg sobra) e de 15 a 25 horas de impressão no total, conforme a impressora.
 
-**Cores:** tampa clara (cinza claro ou branca), que esquenta menos no sol, e base e capa grafite ou preta. Para destacar o logo e os aros do botão e do alto-falante, passe uma caneta de tinta (tipo Posca) no baixo-relevo e limpe o excesso.
+**Cores:** tampa clara (cinza claro ou branca), que esquenta menos no sol, e base e capa grafite ou preta. Para destacar o logo e os aros dos botões, do microfone e do alto-falante, passe uma caneta de tinta (tipo Posca) no baixo-relevo e limpe o excesso.
 
 **Ordem sugerida:** imprima primeiro a **bandeja** (é a mais rápida) e encaixe nela a placa de extensão e o relé de verdade. Se os furos baterem, imprima o resto.
 
@@ -63,6 +63,7 @@ Vai uns 400 a 450 g de filamento (um rolo de 1 kg sobra) e de 15 a 25 horas de i
 | Abraçadeira de náilon pequena (2,5 mm) | 20 |
 | Um pedaço de tecido fino (tule ou voil) de uns 5 × 5 cm | 1 (fica atrás da grade, contra poeira e respingo) |
 | Cola quente ou silicone neutro | um pouco, para o microfone |
+| Etiqueta de 12 mm (rotulador ou adesivo resistente à água), uma por casa | 2 (rebaixo de 36 × 14 mm à direita de cada botão) |
 
 ## Montagem, passo a passo
 
@@ -74,9 +75,10 @@ Vai uns 400 a 450 g de filamento (um rolo de 1 kg sobra) e de 15 a 25 horas de i
 6. **Tampa.**
    - Alto-falante: cole o tecido atrás da grade, encaixe o alto-falante no anel de assento e aperte o anel com 3 parafusos. A abertura do anel fica para baixo, para os terminais.
    - Microfone: a plaquinha do INMP441 entra na moldura quadrada atrás do furo, **com o furinho dela virado para a frente** (o lado sem o chip). Prenda com uma gota de cola quente nas bordas, sem tapar o furo.
-   - Botão: pelo furo da frente, com a porca e a arruela de borracha por dentro.
+   - Botões: pelos furos da frente, com a porca e a arruela de borracha por dentro. O de cima é a **Casa 1** e o de baixo a **Casa 2**. Cada um tem um fio no GND e o outro no pino da sua casa (Casa 1 no IO17, Casa 2 no IO18). A etiqueta de cada casa cola no rebaixo à direita do botão.
+   - O furo do microfone fica à esquerda dos botões.
    - Amplificador: em pé, no suporte à esquerda do alto-falante (olhando a tampa por dentro, fica à direita). O receptor e o transmissor de 433 MHz, se usar, vão nos suportes do outro lado.
-7. **Fios.** Siga a [Montagem do Porteiro](https://claude.ai/artifact/FWdz2iXjixk4tvX1NonjBW) pino por pino. Passe os fios pelos canais das laterais e prenda com abraçadeiras nos rasgos da bandeja. Os fios que vão para a tampa (alto-falante, microfone e botão) precisam de uns 15 cm de folga, presos com abraçadeira nos olhais de dentro da tampa, para dar para abrir a caixa sem puxar nada. Relés: **1 fechadura, 2 garagem 1, 3 garagem 2, 4 reserva**, da esquerda para a direita, igual ao programa da placa.
+7. **Fios.** Siga a [Montagem do Porteiro](https://claude.ai/artifact/FWdz2iXjixk4tvX1NonjBW) pino por pino. Passe os fios pelos canais das laterais e prenda com abraçadeiras nos rasgos da bandeja. Os fios que vão para a tampa (alto-falante, microfone e botões) precisam de uns 15 cm de folga, presos com abraçadeira nos olhais de dentro da tampa, para dar para abrir a caixa sem puxar nada. Relés: **1 fechadura, 2 garagem 1, 3 garagem 2, 4 reserva**, da esquerda para a direita, igual ao programa da placa.
 8. **Fechar.** Cole a fita de espuma em volta da borda da frente da base. Encaixe a tampa reto, de frente, até estalar em cima, e coloque os 2 parafusos por baixo.
 
 Para abrir: tire os 2 parafusos de baixo e puxe a tampa para a frente. A capa e a base continuam na parede.
@@ -100,7 +102,7 @@ Todas estão no começo do arquivo [porteiro_caixa.scad](porteiro_caixa.scad) e 
 | Relé de 4 canais | 75 × 55 mm, furos a 69,5 × 49,5 mm entre centros | `rele_l`, `rele_w`, `rele_furo` |
 | Regulador LM2596 | 43 × 21 mm | `reg_l`, `reg_w` |
 | Alto-falante | 40 mm de diâmetro, até 16 mm de fundo | `fal_d`, `fal_prof` |
-| Botão | furo de 19 mm (16 e 22 também servem), corpo de até 24 mm | `botao_d`, `botao_prof` |
+| Botões (2) | pulso inox antivandalismo de 16 mm (furo de 16,3 mm), corpo de até 28 mm atrás da tampa; 19 e 22 mm também servem | `botao_d`, `botao_prof`, `botoes_y` |
 | Microfone INMP441 | plaquinha de 14,5 mm | `mic_lado` |
 | Prensa-cabos | PG7 (furo de 12,5 mm), 4 unidades | `pg_furo`, `pg_n` |
 

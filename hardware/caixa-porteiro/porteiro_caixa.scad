@@ -82,13 +82,16 @@ fal_y     = 165;  // altura do centro (do chão interno)
 
 /* [Microfone INMP441] */
 mic_lado = 14.5;  // lado da plaquinha
-mic_y    = 118;   // altura do furo (do chão interno)
+mic_x    = -34;   // deslocamento do furo em relação ao centro (fica à esquerda dos botões)
+mic_y    = 101;   // altura do furo (do chão interno)
 mic_prof = 20;    // espaço atrás (plaquinha + pinos + conector)
 
-/* [Botão da campainha (inox, de embutir)] */
-botao_d    = 19;  // furo: 16, 19 ou 22 mm
-botao_prof = 24;  // corpo atrás da frente, com os terminais
-botao_y    = 95;
+/* [Botões da campainha (inox, de embutir), um por casa] */
+botao_d    = 16;  // furo: 16 mm (botão de pulso inox antivandalismo, rosca M16); 19 e 22 também servem
+botao_prof = 28;  // corpo atrás da frente, com os bornes de parafuso
+botoes_y   = [114, 88];   // altura de cada botão (do chão interno): Casa 1 em cima, Casa 2 embaixo
+botao_x    = -8;  // deslocamento da coluna de botões em relação ao centro
+etiqueta   = [36, 14];   // rebaixo para a etiqueta de cada casa, à direita do botão (fita de 12 mm cabe)
 
 /* [Prensa-cabos no fundo] */
 pg_n    = 4;      // quantidade
@@ -317,8 +320,8 @@ fal_c   = [cx, parede + fal_y];
 suportes_tampa = [[cx - fal_d/2 - 16, parede + fal_y - 4, amp_l, amp_h, "#6a2c91"],
                   [cx + fal_d/2 + 13, parede + fal_y - 4, rx_l, rx_h, "#1e7a3c"],
                   [cx + fal_d/2 + 21, parede + fal_y - 4, tx_l, tx_h, "#1e7a3c"]];
-mic_c   = [cx, parede + mic_y];
-botao_c = [cx, parede + botao_y];
+mic_c   = [cx + mic_x, parede + mic_y];
+botoes_c = [for (y = botoes_y) [cx + botao_x, parede + y]];
 logo_c  = [cx, parede + 40];
 
 module grade(r, fenda = 1.8, passo = 3.6) {
@@ -363,11 +366,11 @@ module tampa() {
                 tubo(2.5, 1.2, 2.5 + e);
             }
             // botão: reforço em volta do furo
-            translate([botao_c[0], botao_c[1], z_face - 2]) cylinder(d = botao_d + 12, h = 2 + e);
+            for (b = botoes_c) translate([b[0], b[1], z_face - 2]) cylinder(d = botao_d + 12, h = 2 + e);
             // amplificador e rádio 433 MHz: placas em pé, presas na tampa dos lados do alto-falante
             for (h = suportes_tampa) translate([h[0], h[1], z_face + e]) mirror([0, 0, 1]) rotate(90) suporte_vertical(h[2]);
             // olhais para abraçadeira (prender o chicote de fios na tampa)
-            for (p = [[cx - 30, parede + 105], [cx + 30, parede + 105], [cx - 30, parede + 150]]) translate([p[0], p[1], z_face - 5]) difference() {
+            for (p = [[cx - 30, parede + 130], [cx + 30, parede + 105], [cx + 30, parede + 130]]) translate([p[0], p[1], z_face - 5]) difference() {
                 translate([-4, -3, 0]) cube([8, 6, 5 + e]);
                 translate([-5, -2, 1.2]) cube([10, 4, 2]);
             }
@@ -378,7 +381,9 @@ module tampa() {
         translate([mic_c[0], mic_c[1], z_face - 3]) cylinder(d = 1.4, h = face_t + 4, $fn = 24);
         translate([mic_c[0], mic_c[1], z_frente - 0.8]) cylinder(d1 = 1.4, d2 = 3.2, h = 0.8 + e, $fn = 32);
         // botão
-        translate([botao_c[0], botao_c[1], z_face - 3]) cylinder(d = botao_d + 0.3, h = face_t + 4);
+        for (b = botoes_c) translate([b[0], b[1], z_face - 3]) cylinder(d = botao_d + 0.3, h = face_t + 4);
+        // rebaixo da etiqueta de cada casa
+        for (b = botoes_c) translate([b[0] + botao_d/2 + 6, b[1] - etiqueta[1]/2, z_frente - 0.8]) linear_extrude(1) rr(etiqueta[0], etiqueta[1], 2);
         // furos das torres do anel
         for (a = [90, 210, 330]) translate([fal_c[0] + (fal_d/2 + 5)*cos(a), fal_c[1] + (fal_d/2 + 5)*sin(a), z_face - 4.1]) cylinder(d = piloto, h = 5.5);
         // aberturas da lingueta onde ficam os parafusos de baixo
@@ -388,7 +393,8 @@ module tampa() {
         // desenhos em baixo-relevo na frente
         translate([0, 0, z_frente - 0.6]) linear_extrude(1) {
             translate(fal_c) difference() { circle(r = fal_d/2 + 2.5); circle(r = fal_d/2 + 1.5); }
-            translate(botao_c) difference() { circle(r = botao_d/2 + 4.5); circle(r = botao_d/2 + 3.5); }
+            for (b = botoes_c) translate(b) difference() { circle(r = botao_d/2 + 4.5); circle(r = botao_d/2 + 3.5); }
+            translate(mic_c) difference() { circle(r = 3.6); circle(r = 2.8); }
             translate(logo_c) {
                 translate([-13, 0]) olho(12);
                 translate([-3, 0]) text(logo, size = 8, font = fonte, valign = "center");
@@ -529,7 +535,11 @@ module componentes_bandeja() {
 }
 module componentes_tampa() {
     translate([fal_c[0], fal_c[1], z_face - fal_borda]) mock_falante();
-    translate([botao_c[0], botao_c[1], z_face]) mock_botao();
+    for (b = botoes_c) translate([b[0], b[1], z_face]) mock_botao();
+    for (i = [0 : len(botoes_c) - 1]) translate([botoes_c[i][0] + botao_d/2 + 6.3, botoes_c[i][1] - etiqueta[1]/2 + 0.3, z_frente - 0.75]) {
+        color("#fafafa") linear_extrude(0.5) rr(etiqueta[0] - 0.6, etiqueta[1] - 0.6, 1.7);
+        color("#222") translate([etiqueta[0]/2, etiqueta[1]/2 - 0.3, 0.5]) linear_extrude(0.1) text(str("CASA ", i + 1), size = 5, font = fonte, halign = "center", valign = "center");
+    }
     translate([mic_c[0], mic_c[1], z_face - 2]) mock_mic();
     translate([fal_c[0], fal_c[1], z_face - 6]) color("#e9e9e9") anel();
     for (h = suportes_tampa) translate([h[0], h[1], z_face]) mock_vertical(h[2], h[3], h[4]);
