@@ -130,7 +130,7 @@ def manage_devices(cfg: config.Config, action: str | None, ref: str | None, comm
                 print("Nenhum aparelho cadastrado. Abra o Zóio no aparelho para ele aparecer aqui.")
             for d in items:
                 seen = datetime.fromtimestamp(d["last_seen"]).strftime("%d/%m %H:%M") if d["last_seen"] else "nunca"
-                extras = (" (admin)" if d["admin"] else "") + (" (portaria)" if d["gate"] else "")
+                extras = (" (admin)" if d["admin"] else "") + (" (portaria)" if d["gate"] else "") + (f" (casa {d['house']})" if d["house"] else "")
                 print(f"{d['code']}  {STATUS.get(d['status'], d['status']):<10} {d['name']}{extras}  · visto: {seen}  · id {d['id']}")
             if not cfg.device_approval:
                 print("Atenção: a aprovação de aparelhos está desligada (ZOIO_DEVICE_APPROVAL=0).")
@@ -201,7 +201,13 @@ def manage_porteiro(cfg: config.Config, action: str, door: str | None, seconds: 
                     for d in porteiro.doors.values():
                         extra = "" if d.kind == "portao" else (" (com sensor)" if d.sensor else " (sem sensor: só acionar)")
                         print(f"  porta {d.id}: {d.name}{extra}" + (f", câmera {d.camera}" if d.camera else ""))
-                    print("  campainha: " + ("ok" if info["doorbell"] else "não encontrada"))
+                    bells = porteiro.bell_list()
+                    if len(bells) > 1:
+                        print("  campainhas: " + ", ".join(b["name"] for b in bells))
+                    else:
+                        print("  campainha: " + ("ok" if bells else "não encontrada"))
+                    if info.get("exit_button"):
+                        print("  botão de saída: ok")
                     if "portao" not in porteiro.doors:
                         print("  atenção: não achei o botão abrir_portao.")
                         return 1

@@ -10,7 +10,11 @@ Nomes que a placa precisa ter (deploy/esphome/porteiro.yaml):
   abre, para ou fecha conforme o momento (igual ao controle remoto);
 - sensores `garagem_1_aberta`...: sensor magnético de cada garagem (opcional,
   mas sem ele a garagem só tem o comando genérico "acionar");
-- sensor `campainha`: botão de campainha;
+- sensores `campainha`, `campainha_2`...: botão de campainha de cada casa
+  (com mais de uma, cada aparelho pode ser marcado com a sua casa e só recebe
+  o aviso dela);
+- sensor `botao_saida` (opcional): botão do lado de dentro; a placa abre o
+  portão sozinha (funciona sem o Pi) e o Zóio só registra;
 - ações `conversa_iniciar(chave)` e `conversa_parar` (opcionais): microfone e
   alto-falante no portão, com o áudio por UDP cifrado (ver conversa.py).
 
@@ -47,7 +51,9 @@ RC_SWITCH = re.compile(r"Received RCSwitch Raw: protocol=(\d+) data='([01]+)'")
 
 GATE_ID = "portao"
 GATE_BUTTON = "abrir_portao"
-DOORBELL = "campainha"
+BELL = re.compile(r"^campainha(?:_(\d{1,2}))?$")  # campainha (casa 1), campainha_2...
+EXIT_BUTTON = "botao_saida"
+EXIT_BY = "botão de dentro"
 WIFI_SIGNAL = "sinal_wi-fi"  # "Sinal Wi-Fi" no firmware
 CALL_START = "conversa_iniciar"
 CALL_STOP = "conversa_parar"
@@ -125,8 +131,10 @@ class Porteiro:
         self._call_info: dict = {}
         self.wifi_dbm: float | None = None
         self._synced: set[str] = set()  # sensores que já mandaram a leitura inicial
-        self._bell = False
-        self._last_ring = -RING_INTERVAL
+        self.bells: dict[str, int] = {}  # sensor da campainha -> número da casa
+        self._bell: dict[str, bool] = {}
+        self._last_ring: dict[int, float] = {}
+        self._last_exit = -MIN_INTERVAL
         self._last: dict[str, float] = {}
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
@@ -149,10 +157,20 @@ class Porteiro:
             "allowed": allowed,
             "camera": self.cfg.gate_camera,
             "doorbell": bool(self.info.get("doorbell")),
+            "bells": self.bell_list(),
             "talk": bool(self.info.get("talk")),
             "talking": self._call_info.get("by") if self.call else None,
             "doors": [d.public() for d in self.doors.values()],
         }
+
+    def bell_list(self) -> list[dict]:
+        """Campainhas da placa, uma por casa. Com uma só, ela não tem nome de casa."""
+        houses = sorted(self.bells.values())
+        return [{"house": n, "name": self.cfg.bell_name(n) if len(houses) > 1 else None} for n in houses]
+
+    @staticmethod
+    def _find_bells(sensors: set[str]) -> dict[str, int]:
+        return {s: int(m.group(1) or 1) for s in sensors if (m := BELL.match(s))}
 
     # ---------------------------------------------------------------- conexão
 
@@ -185,9 +203,11 @@ class Porteiro:
         self._keys = {obj: key for obj, (key, _) in {**entities.buttons, **entities.binary_sensors}.items()}
         self._services = dict(entities.services)
         self.doors = self._build_doors(set(entities.buttons), set(entities.binary_sensors))
+        self.bells = self._find_bells(set(entities.binary_sensors))
         self.info = {
             "name": board.name, "mac": board.mac, "version": board.server_info,
-            "doorbell": DOORBELL in entities.binary_sensors,
+            "doorbell": bool(self.bells),
+            "exit_button": EXIT_BUTTON in entities.binary_sensors,
             "talk": CALL_START in entities.services,
             "buttons": sorted(entities.buttons), "sensors": sorted(entities.binary_sensors),
         }
@@ -232,6 +252,7 @@ class Porteiro:
             return
         self.info = saved.get("info", {})
         self.doors = self._build_doors(set(saved.get("buttons", [])), set(saved.get("sensors", [])))
+        self.bells = self._find_bells(set(saved.get("sensors", [])))
 
     def _save_cache(self) -> None:
         self.store.set(CACHE_KEY, json.dumps({"info": self.info, "buttons": self.info["buttons"], "sensors": self.info["sensors"]}))
@@ -252,10 +273,14 @@ class Porteiro:
             return
         first = obj not in self._synced
         self._synced.add(obj)
-        if obj == DOORBELL:
-            if state and not self._bell and not first:
-                self._spawn(self.ring())
-            self._bell = state
+        if obj == EXIT_BUTTON:
+            if state and not first:
+                self._spawn(self._log_exit())
+            return
+        if obj in self.bells:
+            if state and not self._bell.get(obj) and not first:
+                self._spawn(self.ring(self.bells[obj]))
+            self._bell[obj] = state
             return
         door = next((d for d in self.doors.values() if d.sensor == obj), None)
         if door is None or door.open == state:
@@ -272,18 +297,34 @@ class Porteiro:
                 self._spawn(self._log_change(door, state))
         self._publish_state()
 
-    async def ring(self) -> dict | None:
-        """Alguém tocou a campainha: avisa na hora e guarda a foto de quem tocou."""
+    async def ring(self, house: int = 1) -> dict | None:
+        """Alguém tocou a campainha da casa: avisa na hora e guarda a foto de quem tocou."""
         now = time.monotonic()
-        if now - self._last_ring < RING_INTERVAL:
+        if now - self._last_ring.get(house, -RING_INTERVAL) < RING_INTERVAL:
             return None
-        self._last_ring = now
-        log.info("porteiro: campainha")
+        self._last_ring[house] = now
+        name = next((b["name"] for b in self.bell_list() if b["house"] == house), None)
+        log.info("porteiro: campainha%s", f" ({name})" if name else "")
         if self.notifier:
-            self._spawn(self.notifier.doorbell())
+            self._spawn(self.notifier.doorbell(house, name))
         image = await self._photo(self.cfg.gate_camera)
-        event = self._add_event(self.cfg.gate_camera, BELL_KIND, "Tocou", {"door": GATE_ID, "photo": bool(image)}, image)
+        detail = {"door": GATE_ID, "photo": bool(image), "house": house, "house_name": name}
+        event = self._add_event(self.cfg.gate_camera, BELL_KIND, "Tocou", detail, image)
         self.bus.publish({"type": "campainha", **event})
+        return event
+
+    async def _log_exit(self) -> dict | None:
+        """Abriram pelo botão de dentro. A placa já abriu sozinha: aqui só fica o registro."""
+        now = time.monotonic()
+        if now - self._last_exit < MIN_INTERVAL:
+            return None
+        self._last_exit = now
+        log.info("porteiro: portão aberto pelo %s", EXIT_BY)
+        door = self.doors.get(GATE_ID)
+        image = await self._photo(self.cfg.gate_camera)
+        detail = {"door": GATE_ID, "name": door.name if door else "Portão", "action": "abrir", "by": EXIT_BY, "device_id": None, "error": None, "photo": bool(image)}
+        event = self._add_event(self.cfg.gate_camera, GATE_KIND, DONE[("portao", "abrir")], detail, image)
+        self.bus.publish({"type": "porta", **event})
         return event
 
     async def _log_change(self, door: Door, opened: bool) -> None:

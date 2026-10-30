@@ -1,5 +1,5 @@
 // Service worker do Zóio: notificações (movimento, campainha) e abertura rápida do app.
-const CACHE = 'zoio-v9';
+const CACHE = 'zoio-v10';
 const SHELL = ['/', '/web/app.js', '/web/device.js', '/web/app.css', '/web/icons/icon.svg', '/web/icons/logo.svg', '/web/icons/eye.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {

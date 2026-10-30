@@ -571,6 +571,21 @@ async def api_device_gate(request: web.Request) -> web.Response:
     return web.json_response(public_device(device, me["id"]))
 
 
+async def api_device_house(request: web.Request) -> web.Response:
+    """Casa do aparelho, para a campainha: `{"house": 2}`, ou `null` para receber todas."""
+    me = require_admin(request)
+    target = _target_device(request)
+    body = await json_body(request)
+    house = body.get("house")
+    if house is not None and (isinstance(house, bool) or not isinstance(house, int)):
+        raise web.HTTPBadRequest(text="casa inválida")
+    try:
+        device = request.app[DEVICES].set_house(target["id"], house)
+    except DeviceError as exc:
+        raise web.HTTPBadRequest(text=str(exc))
+    return web.json_response(public_device(device, me["id"]))
+
+
 # ---------------------------------------------------------------- portaria
 
 
@@ -859,6 +874,7 @@ def create_app(cfg: Config, enable_push: bool = True) -> web.Application:
     r.add_post("/api/devices/{id}/revoke", api_device_revoke)
     r.add_post("/api/devices/{id}/delete", api_device_delete)
     r.add_post("/api/devices/{id}/gate", api_device_gate)
+    r.add_post("/api/devices/{id}/house", api_device_house)
     r.add_post("/api/portaria/challenge", api_portaria_challenge)
     r.add_post("/api/portaria/act", api_portaria_act)
     r.add_post("/api/portaria/check", api_portaria_check)

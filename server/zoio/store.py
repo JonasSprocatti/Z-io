@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS devices (
     approved_at REAL,
     approved_by TEXT,
     last_seen REAL,
-    gate INTEGER NOT NULL DEFAULT 0
+    gate INTEGER NOT NULL DEFAULT 0,
+    house INTEGER
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT PRIMARY KEY,
@@ -53,7 +54,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS sessions_device ON sessions(device_id);
 """
 
-DEVICE_FIELDS = {"name", "status", "admin", "approved_at", "approved_by", "last_seen", "gate"}
+DEVICE_FIELDS = {"name", "status", "admin", "approved_at", "approved_by", "last_seen", "gate", "house"}
 
 GATE_KIND = "Portao"
 GARAGE_KIND = "Garagem"
@@ -85,6 +86,8 @@ class Store:
             self.db.execute("ALTER TABLE devices ADD COLUMN gate INTEGER NOT NULL DEFAULT 0")
             # quem já administrava o Zóio pode abrir o portão
             self.db.execute("UPDATE devices SET gate = 1 WHERE admin = 1 AND status = 'approved'")
+        if "house" not in self._columns("devices"):  # casa do aparelho, para a campainha (vazio: todas)
+            self.db.execute("ALTER TABLE devices ADD COLUMN house INTEGER")
         self.db.commit()
 
     def close(self) -> None:
@@ -142,10 +145,13 @@ class Store:
         self.db.execute("DELETE FROM push_subscriptions WHERE device_id = ?", (device_id,))
         self.db.commit()
 
-    def subscriptions(self, approved_only: bool = False, admins_only: bool = False, gate_only: bool = False) -> list[dict]:
-        """Inscrições de push. Com a aprovação ligada, só as de aparelhos aprovados."""
+    def subscriptions(self, approved_only: bool = False, admins_only: bool = False, gate_only: bool = False, house: int | None = None) -> list[dict]:
+        """Inscrições de push. Com a aprovação ligada, só as de aparelhos aprovados.
+
+        Com `house`, deixa de fora os aparelhos marcados com outra casa (os sem casa recebem todas).
+        """
         sql = (
-            "SELECT s.data, s.cameras, s.device_id, d.status, d.admin, d.gate FROM push_subscriptions s "
+            "SELECT s.data, s.cameras, s.device_id, d.status, d.admin, d.gate, d.house FROM push_subscriptions s "
             "LEFT JOIN devices d ON d.id = s.device_id"
         )
         rows = self.db.execute(sql).fetchall()
@@ -154,6 +160,8 @@ class Store:
             if (approved_only or admins_only or gate_only) and r["status"] != "approved":
                 continue
             if (admins_only and not r["admin"]) or (gate_only and not r["gate"]):
+                continue
+            if house is not None and r["house"] is not None and r["house"] != house:
                 continue
             out.append({"sub": json.loads(r["data"]), "cameras": json.loads(r["cameras"]) if r["cameras"] else None, "device_id": r["device_id"]})
         return out

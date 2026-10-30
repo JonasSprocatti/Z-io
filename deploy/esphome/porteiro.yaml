@@ -10,6 +10,8 @@
 #   GPIO7, GPIO15, GPIO16 → amplificador MAX98357A: BCLK, LRC, DIN (VIN no 5V)
 #   GPIO10 → IN1 do módulo relé: fechadura do portão
 #   GPIO17 ← botão da campainha (o outro fio no GND)
+#   GPIO18 ← botão da campainha da casa 2, se houver (o outro fio no GND)
+#   GPIO21 ← botão de saída, do lado de dentro, se houver (o outro fio no GND)
 #   GPIO8  ← DATA do receptor de rádio 433 MHz (RXB6, no 3V3), se houver
 #   Garagens: veja o pacote escolhido em `packages:` no fim deste arquivo.
 #
@@ -90,11 +92,30 @@ button:
 
 binary_sensor:
   - platform: gpio
-    name: "Campainha"
+    name: "Campainha"  # casa 1
     pin: { number: GPIO17, mode: { input: true, pullup: true }, inverted: true }
     filters:
       - delayed_on: 30ms   # ignora ruído no fio
       - delayed_off: 2s    # segura o "tocou" o bastante para chegar no Zóio
+  # Segunda casa: o Zóio avisa só os aparelhos marcados com ela (Ajustes ›
+  # Aparelhos). Sem botão no GPIO18, fica quieta. Para uma casa só, apague.
+  - platform: gpio
+    name: "Campainha 2"  # vira campainha_2
+    pin: { number: GPIO18, mode: { input: true, pullup: true }, inverted: true }
+    filters:
+      - delayed_on: 30ms
+      - delayed_off: 2s
+  # Botão de saída, do lado de dentro: abre o portão na hora, aqui mesmo na
+  # placa, então funciona sem o Pi e sem Wi-Fi. O Zóio registra em Alertas.
+  # Instale onde não dê para alcançar pela grade do lado de fora.
+  - platform: gpio
+    name: "Botao saida"  # vira botao_saida
+    pin: { number: GPIO21, mode: { input: true, pullup: true }, inverted: true }
+    filters:
+      - delayed_on: 50ms   # ignora ruído no fio
+      - delayed_off: 1s
+    on_press:
+      - script.execute: pulso_portao
 
 sensor:
   - platform: wifi_signal
