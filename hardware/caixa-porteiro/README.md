@@ -11,7 +11,7 @@ Caixa de porteiro eletrônico para o portão, com lugar para tudo o que liga no 
 
 As placas e os fios das imagens são só ilustração. Os fios coloridos mostram por onde passam: 12 V e GND pelo canal da esquerda, os sinais do ESP32 para o relé pelo canal da direita, e a fechadura e as garagens saindo do relé direto para os prensa-cabos.
 
-**Tamanho por fora:** 127 × 217 × 57 mm (largura × altura × profundidade), mais a aba de chuva, que fica acima.
+**Tamanho por fora:** 147 × 217 × 57 mm (largura × altura × profundidade), mais a aba de chuva, que fica acima.
 
 ## As 5 peças
 
@@ -63,20 +63,20 @@ Vai uns 400 a 450 g de filamento (um rolo de 1 kg sobra) e de 15 a 25 horas de i
 | Abraçadeira de náilon pequena (2,5 mm) | 20 |
 | Um pedaço de tecido fino (tule ou voil) de uns 5 × 5 cm | 1 (fica atrás da grade, contra poeira e respingo) |
 | Cola quente ou silicone neutro | um pouco, para o microfone |
-| Etiqueta de 12 mm (rotulador ou adesivo resistente à água), uma por casa | 2 (rebaixo de 36 × 14 mm à direita de cada botão) |
+| Etiqueta de 12 mm (rotulador ou adesivo resistente à água), uma por casa | 2 (rebaixo de 30 × 14 mm embaixo de cada botão) |
 
 ## Montagem, passo a passo
 
 1. **Prensa-cabos.** Os 4 furos de baixo vêm fechados por uma película fina (furos "destacáveis"), para não entrar água nos que você não usar. Fure só os que for usar: encoste uma chave de fenda no centro e dê uma batidinha, ou use uma broca de 12 mm. Do lado de fora, embaixo de cada furo, está escrito o que passa ali: **12V** (fonte), **TRAVA** (fechadura), **GAR 1** e **GAR 2** (o cabo de 4 vias de cada garagem). Rosqueie os prensa-cabos com a contraporca por dentro. Se os fios vierem de dentro do muro, os dois círculos destacáveis no fundo, embaixo, servem de passagem.
-2. **Placas na bandeja.** Parafuse a placa de extensão (com o ESP32 encaixado) em cima e o relé embaixo, com os bornes verdes virados para baixo. O regulador fica deitado entre as 4 cantoneiras da esquerda, preso com uma abraçadeira. Os 3 Wago encaixam nos lugares marcados **12V**, **5V** e **GND**, cada um preso com uma abraçadeira.
+2. **Placas na bandeja.** Parafuse a placa de extensão (com o ESP32 encaixado) em cima e o relé embaixo, com os bornes verdes virados para baixo. O regulador fica deitado entre as 4 cantoneiras à direita do relé, preso com uma abraçadeira. Os 3 Wago encaixam na fileira do meio, nos lugares marcados **12V**, **5V** e **GND**, com a entrada dos fios virada para cima e cada um preso com uma abraçadeira.
 3. **Caixa na parede.** Sempre com os prensa-cabos **para baixo**, nunca para cima ou para o lado. Use a própria base para marcar os 4 furos e confira com um nível. Deixe o furinho de dreno (o pequeno, embaixo, ao lado dos prensa-cabos) aberto: ele deixa sair a água de condensação.
 4. **Capa.** Encoste a capa na parede logo acima da caixa, com as abas laterais abraçando os lados, marque e parafuse os 2 furos.
-5. **Bandeja na caixa.** Encaixe os 4 furos largos da bandeja nos 4 ganchos do fundo, empurre contra o fundo e deslize **7 mm para baixo**: ela fica pendurada nos ganchos. Coloque o parafuso-trava (o furo pequeno da direita, entre os Wago e a placa de extensão), que impede a bandeja de subir e soltar.
+5. **Bandeja na caixa.** Encaixe os 4 furos largos da bandeja nos 4 ganchos do fundo, empurre contra o fundo e deslize **7 mm para baixo**: ela fica pendurada nos ganchos. Coloque o parafuso-trava (o furo pequeno no canto da direita, logo acima do Wago de GND), que impede a bandeja de subir e soltar.
 6. **Tampa.**
    - Alto-falante: cole o tecido atrás da grade, encaixe o alto-falante no anel de assento e aperte o anel com 3 parafusos. A abertura do anel fica para baixo, para os terminais.
    - Microfone: a plaquinha do INMP441 entra na moldura quadrada atrás do furo, **com o furinho dela virado para a frente** (o lado sem o chip). Prenda com uma gota de cola quente nas bordas, sem tapar o furo.
-   - Botões: pelos furos da frente, com a porca e a arruela de borracha por dentro. O de cima é a **Casa 1** e o de baixo a **Casa 2**. Cada um tem um fio no GND e o outro no pino da sua casa (Casa 1 no IO17, Casa 2 no IO18). A etiqueta de cada casa cola no rebaixo à direita do botão.
-   - O furo do microfone fica à esquerda dos botões.
+   - Botões: pelos furos da frente, com a porca e a arruela de borracha por dentro. O da esquerda é a **Casa 1** e o da direita a **Casa 2**. Cada um tem um fio no GND e o outro no pino da sua casa (Casa 1 no IO17, Casa 2 no IO18). A etiqueta de cada casa cola no rebaixo embaixo do botão.
+   - O furo do microfone fica entre os dois botões.
    - Amplificador: em pé, no suporte à esquerda do alto-falante (olhando a tampa por dentro, fica à direita). O receptor e o transmissor de 433 MHz, se usar, vão nos suportes do outro lado.
 7. **Fios.** Siga a [Montagem do Porteiro](https://claude.ai/artifact/FWdz2iXjixk4tvX1NonjBW) pino por pino. Passe os fios pelos canais das laterais e prenda com abraçadeiras nos rasgos da bandeja. Os fios que vão para a tampa (alto-falante, microfone e botões) precisam de uns 15 cm de folga, presos com abraçadeira nos olhais de dentro da tampa, para dar para abrir a caixa sem puxar nada. Relés: **1 fechadura, 2 garagem 1, 3 garagem 2, 4 reserva**, da esquerda para a direita, igual ao programa da placa.
 8. **Fechar.** Cole a fita de espuma em volta da borda da frente da base. Encaixe a tampa reto, de frente, até estalar em cima, e coloque os 2 parafusos por baixo.
@@ -98,11 +98,11 @@ Todas estão no começo do arquivo [porteiro_caixa.scad](porteiro_caixa.scad) e 
 
 | Peça | Medida usada | Nome no arquivo |
 |---|---|---|
-| Placa de extensão V2775 | 83 × 63 mm, furos a 3,5 mm das bordas | `ext_l`, `ext_w`, `ext_furo` |
+| Placa de extensão V2775 | 83 × 83 mm (medida pelo Jonas), furos supostos a 3,5 mm das bordas | `ext_l`, `ext_w`, `ext_furo` |
 | Relé de 4 canais | 75 × 55 mm, furos a 69,5 × 49,5 mm entre centros | `rele_l`, `rele_w`, `rele_furo` |
 | Regulador LM2596 | 43 × 21 mm | `reg_l`, `reg_w` |
-| Alto-falante | 40 mm de diâmetro, até 16 mm de fundo | `fal_d`, `fal_prof` |
-| Botões (2) | pulso inox antivandalismo de 16 mm (furo de 16,3 mm), corpo de até 28 mm atrás da tampa; 19 e 22 mm também servem | `botao_d`, `botao_prof`, `botoes_y` |
+| Alto-falante | 57 mm, à prova d'água, 4 Ω, 3 W, até 20 mm de fundo (o de 45 mm também cabe) | `fal_d`, `fal_prof` |
+| Botões (2) | pulso inox antivandalismo de 16 mm (furo de 16,3 mm), corpo de até 28 mm atrás da tampa; 19 e 22 mm também servem | `botao_d`, `botao_prof`, `botoes` |
 | Microfone INMP441 | plaquinha de 14,5 mm | `mic_lado` |
 | Prensa-cabos | PG7 (furo de 12,5 mm), 4 unidades | `pg_furo`, `pg_n` |
 

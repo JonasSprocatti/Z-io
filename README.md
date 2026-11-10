@@ -309,7 +309,7 @@ A portaria só funciona com a aprovação de aparelhos ligada, e cada comando ex
   <img src="hardware/caixa-porteiro/previa/3-explodido.png" width="260" alt="Caixa explodida">
 </p>
 
-Uma caixa de porteiro para imprimir, com lugar para a placa de extensão com o ESP32, o relé, o regulador, os conectores, o amplificador, o alto-falante, o microfone, os 2 botões de campainha e o rádio opcional. Tem 127 × 217 × 57 mm, 5 peças (base, tampa, bandeja removível, anel do alto-falante e aba de chuva), prensa-cabos por baixo e vedação com espuma. Imprima em **PETG ou ASA**, nunca PLA, porque o sol amolece.
+Uma caixa de porteiro para imprimir, com lugar para a placa de extensão com o ESP32, o relé, o regulador, os conectores, o amplificador, o alto-falante, o microfone, os 2 botões de campainha e o rádio opcional. Tem 147 × 217 × 57 mm, 5 peças (base, tampa, bandeja removível, anel do alto-falante e aba de chuva), prensa-cabos por baixo e vedação com espuma. Imprima em **PETG ou ASA**, nunca PLA, porque o sol amolece.
 
 O modelo é paramétrico em OpenSCAD ([`porteiro_caixa.scad`](hardware/caixa-porteiro/porteiro_caixa.scad)), e os STLs prontos ficam em [`hardware/caixa-porteiro/stl/`](hardware/caixa-porteiro/stl). Como imprimir, o que comprar, montagem passo a passo e as medidas a conferir antes (algumas placas foram supostas) estão em [hardware/caixa-porteiro/README.md](hardware/caixa-porteiro/README.md).
 

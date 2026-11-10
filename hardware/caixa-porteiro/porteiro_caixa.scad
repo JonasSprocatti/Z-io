@@ -19,7 +19,7 @@ peca = "montagem"; // [montagem, explodida, interior, tampa_dentro, base, bandej
 /* [Caixa] */
 parede   = 3;     // espessura das paredes laterais
 fundo    = 3;     // espessura do fundo (encosta na parede)
-in_w     = 116;   // largura interna
+in_w     = 136;   // largura interna
 in_h     = 206;   // altura interna
 in_d     = 50;    // profundidade interna
 raio     = 8;     // raio dos cantos por fora da base
@@ -34,16 +34,16 @@ vedacao  = 1;     // vão para a fita de espuma entre a borda da base e a tampa
 
 /* [Bandeja] */
 bj_t     = 3;     // espessura da bandeja
-bj_w     = 112;   // largura da bandeja
+bj_w     = 132;   // largura da bandeja
 bj_y0    = 14;    // onde a bandeja fica, medido do chão interno (abaixo ficam os prensa-cabos)
 bj_apoio = 2;     // altura dos apoios da bandeja sobre o fundo
 desliza  = 7;     // quanto a bandeja desce para travar nos ganchos
 standoff = 4;     // altura dos pinos das placas
 piloto   = 2.5;   // furo para parafuso M3 autoatarraxante (plástico)
 
-/* [Placa de extensão do ESP32-S3 (V2775): MEÇA a sua] */
+/* [Placa de extensão do ESP32-S3 (V2775), medida pelo Jonas em 10/11: 83 x 83 mm] */
 ext_l     = 83;   // comprimento (no sentido do ESP32)
-ext_w     = 63;   // largura
+ext_w     = 83;   // largura
 ext_furo  = 3.5;  // distância do centro do furo até a borda
 // altura da pilha extensão + ESP32 encaixado (pinos, soquete, módulo)
 ext_pilha = 15;
@@ -75,23 +75,23 @@ wago5 = [29.9, 18.6];   // 221-415 (5 fios): 5 V e GND
 wago_alt = 8.3;
 
 /* [Alto-falante] */
-fal_d     = 40;   // diâmetro (40 mm, 3 W é o mais comum; 50 também cabe)
-fal_prof  = 16;   // profundidade atrás da borda
+fal_d     = 57;   // diâmetro: 57 mm, à prova d'água, 4 ohms, 3 W (45 mm também cabe)
+fal_prof  = 20;   // profundidade atrás da borda
 fal_borda = 2;    // espessura da borda que fica presa
 fal_y     = 165;  // altura do centro (do chão interno)
 
 /* [Microfone INMP441] */
 mic_lado = 14.5;  // lado da plaquinha
-mic_x    = -34;   // deslocamento do furo em relação ao centro (fica à esquerda dos botões)
-mic_y    = 101;   // altura do furo (do chão interno)
+mic_x    = 0;     // deslocamento do furo em relação ao centro (fica entre os dois botões)
+mic_y    = 89;    // altura do furo (do chão interno)
 mic_prof = 20;    // espaço atrás (plaquinha + pinos + conector)
 
 /* [Botões da campainha (inox, de embutir), um por casa] */
 botao_d    = 16;  // furo: 16 mm (botão de pulso inox antivandalismo, rosca M16); 19 e 22 também servem
 botao_prof = 28;  // corpo atrás da frente, com os bornes de parafuso
-botoes_y   = [114, 88];   // altura de cada botão (do chão interno): Casa 1 em cima, Casa 2 embaixo
-botao_x    = -8;  // deslocamento da coluna de botões em relação ao centro
-etiqueta   = [36, 14];   // rebaixo para a etiqueta de cada casa, à direita do botão (fita de 12 mm cabe)
+// [deslocamento em relação ao centro, altura do chão interno]: Casa 1 à esquerda, Casa 2 à direita
+botoes     = [[-24, 89], [24, 89]];
+etiqueta   = [30, 14];   // rebaixo para a etiqueta de cada casa, embaixo do botão (fita de 12 mm cabe)
 
 /* [Prensa-cabos no fundo] */
 pg_n    = 4;      // quantidade
@@ -129,12 +129,15 @@ by0 = parede + bj_y0;           // bandeja, canto em Y (posição travada)
 bz0 = fundo + bj_apoio;         // bandeja, face de baixo
 
 // layout da bandeja (coordenadas locais)
-rele_y  = 3;
-baixa_y = rele_y + rele_w + 4;        // faixa baixa: regulador e conectores Wago
-baixa_h = 48;
-ext_y   = baixa_y + baixa_h + 4;
-bj_h    = ext_y + ext_w + 3;
 canal   = 11;                          // canais de cabo nas laterais
+rele_x  = canal + 3;                   // relé embaixo, à esquerda
+rele_y  = 3;
+reg_x   = rele_x + rele_l + 5;         // regulador em pé, à direita do relé
+reg_y   = rele_y + 4;
+baixa_y = rele_y + rele_w + 5;         // faixa dos conectores Wago
+baixa_h = 27;
+ext_y   = baixa_y + baixa_h + 2;
+bj_h    = ext_y + ext_w + 3;
 
 // ganchos (posição na bandeja), trava e parafusos da parede
 ganchos = [[6.5, 20], [bj_w-6.5, 20], [6.5, ext_y + 36], [bj_w-6.5, ext_y + 36]];
@@ -149,15 +152,15 @@ paraf_x = [parede + 7, out_w - parede - 7];
 topo_bj = bz0 + bj_t;
 _esp  = topo_bj + standoff + 1.6 + ext_pilha;
 _rele = topo_bj + standoff + rele_alt;
-_reg  = topo_bj + 2 + reg_alt;
+_wago = topo_bj + 1 + wago_alt;
 echo(str("Tamanho por fora: ", tw, " x ", th, " x ", z_frente, " mm (L x A x P)"));
 echo(str("Folga ESP32 atrás do alto-falante: ", z_face - fal_prof - _esp, " mm"));
-echo(str("Folga do botão sobre a faixa baixa: ", z_face - botao_prof - _reg, " mm"));
+echo(str("Folga dos botões sobre os Wago: ", z_face - botao_prof - _wago, " mm"));
 echo(str("Folga do relé até a tampa: ", z_face - _rele, " mm"));
 echo(str("Bandeja: ", bj_w, " x ", bj_h, "; sobra em cima ao encaixar: ", in_h - bj_y0 - bj_h - desliza, " mm"));
 assert(in_h - bj_y0 - bj_h - desliza >= 0, "A bandeja não cabe: aumente in_h");
 assert(z_face - fal_prof - _esp >= 1, "O alto-falante encosta no ESP32: aumente in_d");
-assert(z_face - botao_prof - _reg >= 1, "O botão encosta no regulador: aumente in_d");
+assert(z_face - botao_prof - _wago >= 1, "O botão encosta nos Wago: aumente in_d");
 
 // ---------- utilitários ----------
 module rr(w, h, r) { translate([r, r]) offset(r = r) square([w - 2*r, h - 2*r]); }
@@ -259,13 +262,13 @@ module bandeja() {
         union() {
             rbox(bj_w, bj_h, bj_t, 4);
             // relé: 4 pinos
-            translate([(bj_w - rele_l)/2, rele_y, 0]) for (x = [rele_furo, rele_l - rele_furo], y = [rele_furo, rele_w - rele_furo])
+            translate([rele_x, rele_y, 0]) for (x = [rele_furo, rele_l - rele_furo], y = [rele_furo, rele_w - rele_furo])
                 translate([x, y, bj_t - e]) cylinder(d = 6, h = standoff + e);
             // extensão do ESP32: 4 pinos
             translate([(bj_w - ext_l)/2, ext_y, 0]) for (x = [ext_furo, ext_l - ext_furo], y = [ext_furo, ext_w - ext_furo])
                 translate([x, y, bj_t - e]) cylinder(d = 6.5, h = standoff + e);
             // regulador em pé na esquerda da faixa baixa
-            translate([canal + 2, baixa_y + 2, bj_t - e]) cantoneiras(reg_w, reg_l, 5);
+            translate([reg_x, reg_y, bj_t - e]) cantoneiras(reg_w, reg_l, 5);
             // conectores Wago: um encaixe para cada
             for (w = wagos) translate([w[0] - 1.4, w[1] - 1.4, bj_t - e]) difference() {
                 cube([w[2][0] + 2.8, w[2][1] + 2.8, 2.2]);
@@ -287,30 +290,32 @@ module bandeja() {
         // trava
         translate([trava[0], trava[1], -e]) cylinder(d = 3.4, h = bj_t + 1);
         // pilotos dos pinos
-        translate([(bj_w - rele_l)/2, rele_y, 0]) for (x = [rele_furo, rele_l - rele_furo], y = [rele_furo, rele_w - rele_furo])
+        translate([rele_x, rele_y, 0]) for (x = [rele_furo, rele_l - rele_furo], y = [rele_furo, rele_w - rele_furo])
             translate([x, y, 1]) cylinder(d = piloto, h = 10);
         translate([(bj_w - ext_l)/2, ext_y, 0]) for (x = [ext_furo, ext_l - ext_furo], y = [ext_furo, ext_w - ext_furo])
             translate([x, y, 1]) cylinder(d = piloto, h = 10);
         // abraçadeiras: canais, regulador, Wago, saída dos relés e área do ESP32
         linear_extrude(bj_t * 3, center = true) {
             for (s = [0, 1], y = [14 : 32 : baixa_y + baixa_h]) rasgos_abr([s ? bj_w - canal/2 + 1 : canal/2 - 1, y], 90, 6);
-            rasgos_abr([canal + 2 + reg_w/2, baixa_y + 2 + reg_l/2], 0, reg_w + 6);
+            rasgos_abr([reg_x + reg_w/2, reg_y + reg_l/2], 0, reg_w + 6);
             for (w = wagos) rasgos_abr([w[0] + w[2][0]/2, w[1] + w[2][1]/2], 0, w[2][0] + 5);
             for (s = [-1, 1]) rasgos_abr([bj_w/2 + s*22, ext_y - 2.5], 0, 7);
         }
         // nomes em baixo-relevo
         translate([0, 0, bj_t - 0.6]) linear_extrude(1) {
             for (w = wagos) translate([w[0] + w[2][0]/2, w[1] - 3.2]) text(w[3], size = 2.8, font = fonte, halign = "center", valign = "center");
-            translate([canal + 2 + reg_w/2, baixa_y + 2 + reg_l/2]) rotate(90) text("12V>5V", size = 2.6, font = fonte, halign = "center", valign = "center");
+            translate([reg_x + reg_w/2, reg_y + reg_l/2]) rotate(90) text("12V>5V", size = 2.6, font = fonte, halign = "center", valign = "center");
         }
     }
 }
 // conectores Wago: [x, y, tamanho, nome] na bandeja
-wago_x0 = canal + 2 + reg_w + 8;
+// os três numa fileira, entre o relé e a placa de extensão
+wago_x0 = canal + 5;
+wago_y  = baixa_y + 3.5;
 // o último número diz de que lado entram os fios: 1 em cima, -1 embaixo
-wagos = [[wago_x0, baixa_y + 27, wago3, "12V", 1],
-         [wago_x0 + wago3[0] + 4, baixa_y + 27, wago5, "5V", 1],
-         [wago_x0 + 6, baixa_y + 4, wago5, "GND", -1]];
+wagos = [[wago_x0, wago_y, wago3, "12V", 1],
+         [wago_x0 + wago3[0] + 6, wago_y, wago5, "5V", 1],
+         [wago_x0 + wago3[0] + wago5[0] + 12, wago_y, wago5, "GND", 1]];
 
 // ======================================================================
 // TAMPA (modelada no lugar; para imprimir, vira de cara para baixo)
@@ -321,7 +326,9 @@ suportes_tampa = [[cx - fal_d/2 - 16, parede + fal_y - 4, amp_l, amp_h, "#6a2c91
                   [cx + fal_d/2 + 13, parede + fal_y - 4, rx_l, rx_h, "#1e7a3c"],
                   [cx + fal_d/2 + 21, parede + fal_y - 4, tx_l, tx_h, "#1e7a3c"]];
 mic_c   = [cx + mic_x, parede + mic_y];
-botoes_c = [for (y = botoes_y) [cx + botao_x, parede + y]];
+botoes_c = [for (b = botoes) [cx + b[0], parede + b[1]]];
+// canto de baixo à esquerda do rebaixo da etiqueta de cada botão
+function etiqueta_c(b) = [b[0] - etiqueta[0]/2, b[1] - botao_d/2 - 6.5 - etiqueta[1]];
 logo_c  = [cx, parede + 40];
 
 module grade(r, fenda = 1.8, passo = 3.6) {
@@ -370,7 +377,7 @@ module tampa() {
             // amplificador e rádio 433 MHz: placas em pé, presas na tampa dos lados do alto-falante
             for (h = suportes_tampa) translate([h[0], h[1], z_face + e]) mirror([0, 0, 1]) rotate(90) suporte_vertical(h[2]);
             // olhais para abraçadeira (prender o chicote de fios na tampa)
-            for (p = [[cx - 30, parede + 130], [cx + 30, parede + 105], [cx + 30, parede + 130]]) translate([p[0], p[1], z_face - 5]) difference() {
+            for (p = [[cx - 44, parede + 108], [cx + 44, parede + 108], [cx - 44, parede + 132]]) translate([p[0], p[1], z_face - 5]) difference() {
                 translate([-4, -3, 0]) cube([8, 6, 5 + e]);
                 translate([-5, -2, 1.2]) cube([10, 4, 2]);
             }
@@ -383,7 +390,7 @@ module tampa() {
         // botão
         for (b = botoes_c) translate([b[0], b[1], z_face - 3]) cylinder(d = botao_d + 0.3, h = face_t + 4);
         // rebaixo da etiqueta de cada casa
-        for (b = botoes_c) translate([b[0] + botao_d/2 + 6, b[1] - etiqueta[1]/2, z_frente - 0.8]) linear_extrude(1) rr(etiqueta[0], etiqueta[1], 2);
+        for (b = botoes_c) translate([etiqueta_c(b)[0], etiqueta_c(b)[1], z_frente - 0.8]) linear_extrude(1) rr(etiqueta[0], etiqueta[1], 2);
         // furos das torres do anel
         for (a = [90, 210, 330]) translate([fal_c[0] + (fal_d/2 + 5)*cos(a), fal_c[1] + (fal_d/2 + 5)*sin(a), z_face - 4.1]) cylinder(d = piloto, h = 5.5);
         // aberturas da lingueta onde ficam os parafusos de baixo
@@ -528,17 +535,17 @@ module componentes_base() {
 }
 module componentes_bandeja() {
     z = bj_t + standoff;
-    translate([(bj_w - rele_l)/2, rele_y, z]) mock_rele();
+    translate([rele_x, rele_y, z]) mock_rele();
     translate([(bj_w - ext_l)/2, ext_y, z]) mock_ext();
-    translate([canal + 2 + 0.4, baixa_y + 2 + 0.4, bj_t + 2]) mock_reg();
+    translate([reg_x + 0.4, reg_y + 0.4, bj_t + 2]) mock_reg();
     for (w = wagos) translate([w[0], w[1], bj_t + 1]) mock_wago(w[2][0] > 20 ? 5 : 3);
 }
 module componentes_tampa() {
     translate([fal_c[0], fal_c[1], z_face - fal_borda]) mock_falante();
     for (b = botoes_c) translate([b[0], b[1], z_face]) mock_botao();
-    for (i = [0 : len(botoes_c) - 1]) translate([botoes_c[i][0] + botao_d/2 + 6.3, botoes_c[i][1] - etiqueta[1]/2 + 0.3, z_frente - 0.75]) {
+    for (i = [0 : len(botoes_c) - 1]) translate([etiqueta_c(botoes_c[i])[0] + 0.3, etiqueta_c(botoes_c[i])[1] + 0.3, z_frente - 0.75]) {
         color("#fafafa") linear_extrude(0.5) rr(etiqueta[0] - 0.6, etiqueta[1] - 0.6, 1.7);
-        color("#222") translate([etiqueta[0]/2, etiqueta[1]/2 - 0.3, 0.5]) linear_extrude(0.1) text(str("CASA ", i + 1), size = 5, font = fonte, halign = "center", valign = "center");
+        color("#222") translate([etiqueta[0]/2, etiqueta[1]/2 - 0.3, 0.5]) linear_extrude(0.1) text(str("CASA ", i + 1), size = 4.6, font = fonte, halign = "center", valign = "center");
     }
     translate([mic_c[0], mic_c[1], z_face - 2]) mock_mic();
     translate([fal_c[0], fal_c[1], z_face - 6]) color("#e9e9e9") anel();
@@ -550,13 +557,13 @@ module fio(pts, cor, d = 2) color(cor) for (i = [0 : len(pts) - 2]) hull() { tra
 module fios() {
     gx = function(i) cx + (i - (pg_n - 1)/2)*pg_passo;
     zt = bz0 + bj_t;                       // face de cima da bandeja
-    rx = bx0 + (bj_w - rele_l)/2;          // relé, canto
+    rx = bx0 + rele_x;          // relé, canto
     ry = by0 + rele_y;
     // 12 V da fonte: prensa-cabo 1, canal da esquerda, regulador e Wago de 12 V
-    fio([[gx(0) - 1.5, -8, pg_z], [gx(0) - 1.5, parede + 6, pg_z], [bx0 + 6, parede + 12, zt + 5], [bx0 + 6, by0 + baixa_y + 30, zt + 5],
-         [bx0 + wagos[0][0] + 3, by0 + baixa_y + 30, zt + 5], [bx0 + wagos[0][0] + 3, by0 + wagos[0][1] + 20, zt + 4]], "#d42a2a");
-    fio([[gx(0) + 1.5, -8, pg_z], [gx(0) + 1.5, parede + 6, pg_z], [bx0 + 8.5, parede + 12, zt + 3], [bx0 + 8.5, by0 + baixa_y + 2, zt + 3],
-         [bx0 + wagos[2][0] + 3, by0 + baixa_y + 2, zt + 3], [bx0 + wagos[2][0] + 3, by0 + wagos[2][1] + 2, zt + 3]], "#1a1a1a");
+    fio([[gx(0) - 1.5, -8, pg_z], [gx(0) - 1.5, parede + 6, pg_z], [bx0 + 6, parede + 12, zt + 5], [bx0 + 6, by0 + baixa_y + baixa_h - 1, zt + 5],
+         [bx0 + wagos[0][0] + 3, by0 + baixa_y + baixa_h - 1, zt + 5], [bx0 + wagos[0][0] + 3, by0 + wagos[0][1] + 17, zt + 4]], "#d42a2a");
+    fio([[gx(0) + 1.5, -8, pg_z], [gx(0) + 1.5, parede + 6, pg_z], [bx0 + 8.5, parede + 12, zt + 3], [bx0 + 8.5, by0 + baixa_y + baixa_h - 3, zt + 3],
+         [bx0 + wagos[2][0] + 3, by0 + baixa_y + baixa_h - 3, zt + 9], [bx0 + wagos[2][0] + 3, by0 + wagos[2][1] + 17, zt + 4]], "#1a1a1a");
     // fechadura e garagens: borne do relé direto para o prensa-cabo de baixo
     for (i = [0 : 2]) for (j = [0, 1]) fio([[rx + 8.5 + i*17.5 + j*5, ry + 1, zt + standoff + 8], [rx + 8.5 + i*17.5 + j*5, ry - 4, zt + standoff + 6],
          [gx(i + 1) - 1.5 + j*3, parede + 6, pg_z], [gx(i + 1) - 1.5 + j*3, -8, pg_z]], ["#f0c419", "#2f7de1", "#27ae60"][i]);
