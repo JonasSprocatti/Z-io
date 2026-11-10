@@ -58,7 +58,7 @@ Vai uns 400 a 450 g de filamento (um rolo de 1 kg sobra) e de 15 a 25 horas de i
 | Parafuso auto-atarraxante cabeça panela 2,9 × 9,5 mm (ou M3 × 10) | 12 (relé, placa de extensão, trava da bandeja, anel do alto-falante) |
 | Parafuso auto-atarraxante 2,9 × 13 mm (ou M3 × 12) | 2 (fecham a tampa por baixo) |
 | Parafuso 4 × 30 mm cabeça chata + bucha 6 | 6 (4 na caixa e 2 na capa) |
-| Prensa-cabo PG7 de náilon, com contraporca | 4 |
+| Prensa-cabo PG7 de náilon, com contraporca | 5 |
 | Fita de espuma adesiva (EVA ou EPDM), 3 mm de largura e 2 mm de espessura | 70 cm |
 | Abraçadeira de náilon pequena (2,5 mm) | 20 |
 | Um pedaço de tecido fino (tule ou voil) de uns 5 × 5 cm | 1 (fica atrás da grade, contra poeira e respingo) |
@@ -67,7 +67,7 @@ Vai uns 400 a 450 g de filamento (um rolo de 1 kg sobra) e de 15 a 25 horas de i
 
 ## Montagem, passo a passo
 
-1. **Prensa-cabos.** Os 4 furos de baixo vêm fechados por uma película fina (furos "destacáveis"), para não entrar água nos que você não usar. Fure só os que for usar: encoste uma chave de fenda no centro e dê uma batidinha, ou use uma broca de 12 mm. Do lado de fora, embaixo de cada furo, está escrito o que passa ali: **12V** (fonte), **TRAVA** (fechadura), **GAR 1** e **GAR 2** (o cabo de 4 vias de cada garagem). Rosqueie os prensa-cabos com a contraporca por dentro. Se os fios vierem de dentro do muro, os dois círculos destacáveis no fundo, embaixo, servem de passagem.
+1. **Prensa-cabos.** Os 5 furos de baixo vêm fechados por uma película fina (furos "destacáveis"), para não entrar água nos que você não usar. Fure só os que for usar: encoste uma chave de fenda no centro e dê uma batidinha, ou use uma broca de 12 mm. Do lado de fora, embaixo de cada furo, está escrito o que passa ali: **12V** (fonte), **TRAVA** (fechadura), **GAR 1** e **GAR 2** (o cabo de 4 vias de cada garagem) e **SAÍDA** (o cabo de 2 vias do botão de dentro). Rosqueie os prensa-cabos com a contraporca por dentro. Se os fios vierem de dentro do muro, os dois círculos destacáveis no fundo, embaixo, servem de passagem.
 2. **Placas na bandeja.** Parafuse a placa de extensão (com o ESP32 encaixado) em cima e o relé embaixo, com os bornes verdes virados para baixo. O regulador fica deitado entre as 4 cantoneiras à direita do relé, preso com uma abraçadeira. Os 3 Wago encaixam na fileira do meio, nos lugares marcados **12V**, **5V** e **GND**, com a entrada dos fios virada para cima e cada um preso com uma abraçadeira.
 3. **Caixa na parede.** Sempre com os prensa-cabos **para baixo**, nunca para cima ou para o lado. Use a própria base para marcar os 4 furos e confira com um nível. Deixe o furinho de dreno (o pequeno, embaixo, ao lado dos prensa-cabos) aberto: ele deixa sair a água de condensação.
 4. **Capa.** Encoste a capa na parede logo acima da caixa, com as abas laterais abraçando os lados, marque e parafuse os 2 furos.
@@ -77,6 +77,7 @@ Vai uns 400 a 450 g de filamento (um rolo de 1 kg sobra) e de 15 a 25 horas de i
    - Microfone: a plaquinha do INMP441 entra na moldura quadrada atrás do furo, **com o furinho dela virado para a frente** (o lado sem o chip). Prenda com uma gota de cola quente nas bordas, sem tapar o furo.
    - Botões: pelos furos da frente, com a porca e a arruela de borracha por dentro. O da esquerda é a **Casa 1** e o da direita a **Casa 2**. Cada um tem um fio no GND e o outro no pino da sua casa (Casa 1 no IO17, Casa 2 no IO18). A etiqueta de cada casa cola no rebaixo embaixo do botão.
    - O furo do microfone fica entre os dois botões.
+   - O **botão de saída** (abre o portão por dentro) não fica na caixa, senão quem está na rua também apertaria. Ele vai do lado de dentro do portão, num lugar que não dê para alcançar pela grade, e liga com um cabo de 2 vias que entra pelo prensa-cabo **SAÍDA**: um fio no IO21 e o outro no GND.
    - Amplificador: em pé, no suporte à esquerda do alto-falante (olhando a tampa por dentro, fica à direita). O receptor e o transmissor de 433 MHz, se usar, vão nos suportes do outro lado.
 7. **Fios.** Siga a [Montagem do Porteiro](https://claude.ai/artifact/FWdz2iXjixk4tvX1NonjBW) pino por pino. Passe os fios pelos canais das laterais e prenda com abraçadeiras nos rasgos da bandeja. Os fios que vão para a tampa (alto-falante, microfone e botões) precisam de uns 15 cm de folga, presos com abraçadeira nos olhais de dentro da tampa, para dar para abrir a caixa sem puxar nada. Relés: **1 fechadura, 2 garagem 1, 3 garagem 2, 4 reserva**, da esquerda para a direita, igual ao programa da placa.
 8. **Fechar.** Cole a fita de espuma em volta da borda da frente da base. Encaixe a tampa reto, de frente, até estalar em cima, e coloque os 2 parafusos por baixo.
@@ -104,7 +105,7 @@ Todas estão no começo do arquivo [porteiro_caixa.scad](porteiro_caixa.scad) e 
 | Alto-falante | 57 mm, à prova d'água, 4 Ω, 3 W, até 20 mm de fundo (o de 45 mm também cabe) | `fal_d`, `fal_prof` |
 | Botões (2) | pulso inox antivandalismo de 16 mm (furo de 16,3 mm), corpo de até 28 mm atrás da tampa; 19 e 22 mm também servem | `botao_d`, `botao_prof`, `botoes` |
 | Microfone INMP441 | plaquinha de 14,5 mm | `mic_lado` |
-| Prensa-cabos | PG7 (furo de 12,5 mm), 4 unidades | `pg_furo`, `pg_n` |
+| Prensa-cabos | PG7 (furo de 12,5 mm), 5 unidades | `pg_furo`, `pg_n` |
 
 A placa de extensão é a mais importante: meça com uma régua o comprimento, a largura e a distância do centro de um furo até as duas bordas mais perto. Se for diferente, me mande os números (ou uma foto com a régua do lado) que eu atualizo os arquivos.
 

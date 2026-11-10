@@ -94,12 +94,12 @@ botoes     = [[-24, 89], [24, 89]];
 etiqueta   = [30, 14];   // rebaixo para a etiqueta de cada casa, embaixo do botão (fita de 12 mm cabe)
 
 /* [Prensa-cabos no fundo] */
-pg_n    = 4;      // quantidade
+pg_n    = 5;      // quantidade
 pg_furo = 12.5;   // PG7 = 12,5; PG9 = 15,2; M16 = 16
 pg_passo = 20;
 pg_z    = 13;     // centro do furo, medido da parede
 membrana = 0.6;   // furo "destacável": fica fechado até você furar
-rotulos_pg = ["12V", "TRAVA", "GAR 1", "GAR 2", "RES", "RES"];
+rotulos_pg = ["12V", "TRAVA", "GAR 1", "GAR 2", "SAÍDA", "RES"];
 
 /* [Capa de chuva] */
 capa_aba   = 24;  // quanto avança para a frente
